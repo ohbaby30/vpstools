@@ -33,7 +33,7 @@ sudo ./vpstools.sh
 
 ## Xray 一键部署
 
-脚本支持安装 Xray 稳定版、交互生成 VLESS + REALITY 配置、按香港服务器/流媒体/PayPal/AI 场景选择分流，以及输出 PassWall2 可导入的 `vless://` 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
+脚本支持安装 Xray 稳定版、交互生成 VLESS + REALITY 配置、按香港服务器/流媒体/PayPal/AI 场景选择分流、选择是否通过 `geoip:cn` 屏蔽回国流量，以及输出 PassWall2 可导入的 `vless://` 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
 
 ### 尚未安装 Xray
 

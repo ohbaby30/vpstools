@@ -23,6 +23,7 @@ PRIVATE_KEY=''
 PUBLIC_KEY=''
 SHORT_ID=''
 ENABLE_SITE_ROUTING=0
+BLOCK_CN_IP=0
 CLIENT_ADDRESS=''
 CLIENT_NAME=''
 VLESS_URL=''
@@ -488,7 +489,17 @@ collect_configuration() {
     fi
 
     if ((ENABLE_SITE_ROUTING == 0)); then
-        info "未启用额外分流。广告、BT 和中国 IP 屏蔽规则仍会保留。"
+        info "未启用额外分流。广告和 BT 屏蔽规则仍会保留。"
+    fi
+
+    printf '\n%b========== 回国流量设置 ==========%b\n\n' "$GREEN" "$RESET"
+    warn "屏蔽回国流量会阻止目标 IP 属于中国大陆的连接，可能带来意想不到的问题，请慎用。"
+    if ask_yes_no '是否需要屏蔽回国流量（geoip:cn IP 检测）？' n; then
+        BLOCK_CN_IP=1
+        info "将加入 geoip:cn 屏蔽规则。"
+    else
+        BLOCK_CN_IP=0
+        info "不会生成 geoip:cn 屏蔽规则。"
     fi
 
     prompt_host '请输入客户端连接的服务器域名或 IP' "$detected_ip"
@@ -547,6 +558,17 @@ write_routing_rules() {
                 ;;
         esac
     done
+}
+
+write_cn_ip_block_rule() {
+    if ((BLOCK_CN_IP == 1)); then
+        printf '%s' ',
+      {
+        "type": "field",
+        "ip": ["geoip:cn"],
+        "outboundTag": "block"
+      }'
+    fi
 }
 
 write_proxy_outbound() {
@@ -614,12 +636,8 @@ write_config() {
         "type": "field",
         "domain": ["geosite:category-ads-all"],
         "outboundTag": "block"
-      },
-      {
-        "type": "field",
-        "ip": ["geoip:cn"],
-        "outboundTag": "block"
       }'
+        write_cn_ip_block_rule
         write_routing_rules
         printf '%s' "
     ]
