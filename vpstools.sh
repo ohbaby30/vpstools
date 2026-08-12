@@ -214,7 +214,7 @@ set_shanghai_timezone() {
 show_menu() {
     clear
     printf '%b========== %s ==========%b\n' "$BOLD" "$SCRIPT_NAME" "$RESET"
-    printf '%b作者：ohbaby30  |  用途：个人自用%b\n\n' "$META_COLOR" "$RESET"
+    printf '%b作者：ohbaby30  |  个人自用  |  谨慎使用  |  概不负责%b\n\n' "$META_COLOR" "$RESET"
     printf '%b【Debian / 服务器工具】%b\n' "$SERVER_COLOR" "$RESET"
     printf '%b  1. 更新软件源并安装常用工具%b\n' "$SERVER_COLOR" "$RESET"
     printf '%b  2. Debian 校准时间（Asia/Shanghai）%b\n' "$SERVER_COLOR" "$RESET"
