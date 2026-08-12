@@ -9,6 +9,7 @@ readonly XRAY_INSTALL_URL="https://github.com/XTLS/Xray-install/raw/main/install
 readonly SING_BOX_INSTALL_URL="https://sing-box.app/install.sh"
 readonly RESET='\033[0m'
 readonly BOLD='\033[1m'
+readonly META_COLOR='\033[1;33m'
 readonly SERVER_COLOR='\033[1;36m'
 readonly XRAY_COLOR='\033[1;31m'
 readonly SING_BOX_COLOR='\033[1;32m'
@@ -197,7 +198,8 @@ set_shanghai_timezone() {
 
 show_menu() {
     clear
-    printf '%b========== %s ==========%b\n\n' "$BOLD" "$SCRIPT_NAME" "$RESET"
+    printf '%b========== %s ==========%b\n' "$BOLD" "$SCRIPT_NAME" "$RESET"
+    printf '%b作者：ohbaby30  |  用途：个人自用%b\n\n' "$META_COLOR" "$RESET"
     printf '%b【Debian / 服务器工具】%b\n' "$SERVER_COLOR" "$RESET"
     printf '%b  1. Debian 校准时间（Asia/Shanghai）%b\n' "$SERVER_COLOR" "$RESET"
     printf '%b  2. 流媒体测试%b\n' "$SERVER_COLOR" "$RESET"
