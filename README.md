@@ -88,16 +88,16 @@ sudo ./xray-onekey.sh --skip-install
 ./xray-onekey.sh --help
 ```
 
-## 使用同机 Caddy 作为 REALITY dest
+## 使用同机 Caddy 作为 REALITY 伪装目标
 
 例如 Xray 监听 `443`，Caddy HTTPS 监听 `44422`，可以这样填写：
 
 ```text
 Reality 监听端口：443
-Reality dest 域名或 IP：127.0.0.1
-Reality dest 端口：44422
-serverNames：Caddy 证书对应的域名
+Reality 伪装域名或 IP：127.0.0.1
+Reality 伪装域名端口：44422
+Reality 伪装域名：Caddy 证书对应的域名
 客户端连接地址：VPS 公网 IP 或指向该 VPS 的域名
 ```
 
-REALITY 的监听端口与同机 `dest` 端口不能相同，否则会回连 Xray 自身。
+REALITY 的监听端口与同机伪装目标端口不能相同，否则会回连 Xray 自身。
