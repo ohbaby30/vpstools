@@ -72,6 +72,21 @@ run_stream_test() {
     bash <(curl -fsSL "$STREAM_TEST_URL")
 }
 
+install_common_tools() {
+    clear
+    printf '========== 更新软件源并安装常用工具 ==========\n\n'
+    require_root || return 1
+    require_command apt || return 1
+    confirm_system_change "将更新 APT 软件源并安装常用系统工具。" || {
+        info "已取消。"
+        return 0
+    }
+
+    apt update -y && apt install \
+        openssl net-tools iproute2 openresolv dnsutils cron vim unzip \
+        wget curl tar socat jq git -y
+}
+
 enable_bbr() {
     clear
     printf '========== Debian 13 开启 BBR ==========\n\n'
@@ -201,18 +216,19 @@ show_menu() {
     printf '%b========== %s ==========%b\n' "$BOLD" "$SCRIPT_NAME" "$RESET"
     printf '%b作者：ohbaby30  |  用途：个人自用%b\n\n' "$META_COLOR" "$RESET"
     printf '%b【Debian / 服务器工具】%b\n' "$SERVER_COLOR" "$RESET"
-    printf '%b  1. Debian 校准时间（Asia/Shanghai）%b\n' "$SERVER_COLOR" "$RESET"
-    printf '%b  2. 流媒体测试%b\n' "$SERVER_COLOR" "$RESET"
-    printf '%b  3. Debian 13 开启 BBR%b\n' "$SERVER_COLOR" "$RESET"
-    printf '%b  4. 验证 BBR 是否开启%b\n\n' "$SERVER_COLOR" "$RESET"
+    printf '%b  1. 更新软件源并安装常用工具%b\n' "$SERVER_COLOR" "$RESET"
+    printf '%b  2. Debian 校准时间（Asia/Shanghai）%b\n' "$SERVER_COLOR" "$RESET"
+    printf '%b  3. 流媒体测试%b\n' "$SERVER_COLOR" "$RESET"
+    printf '%b  4. Debian 13 开启 BBR%b\n' "$SERVER_COLOR" "$RESET"
+    printf '%b  5. 验证 BBR 是否开启%b\n\n' "$SERVER_COLOR" "$RESET"
     printf '%b【Xray 工具】%b\n' "$XRAY_COLOR" "$RESET"
-    printf '%b  5. 安装 Xray 稳定版%b\n' "$XRAY_COLOR" "$RESET"
-    printf '%b  6. Xray 生成密钥%b\n' "$XRAY_COLOR" "$RESET"
-    printf '%b  7. 开机自启并启动 Xray%b\n\n' "$XRAY_COLOR" "$RESET"
+    printf '%b  6. 安装 Xray 稳定版%b\n' "$XRAY_COLOR" "$RESET"
+    printf '%b  7. Xray 生成密钥%b\n' "$XRAY_COLOR" "$RESET"
+    printf '%b  8. 开机自启并启动 Xray%b\n\n' "$XRAY_COLOR" "$RESET"
     printf '%b【sing-box 工具】%b\n' "$SING_BOX_COLOR" "$RESET"
-    printf '%b  8. 安装 sing-box 稳定版%b\n' "$SING_BOX_COLOR" "$RESET"
-    printf '%b  9. sing-box 生成密钥%b\n' "$SING_BOX_COLOR" "$RESET"
-    printf '%b 10. 开机自启并启动 sing-box%b\n\n' "$SING_BOX_COLOR" "$RESET"
+    printf '%b  9. 安装 sing-box 稳定版%b\n' "$SING_BOX_COLOR" "$RESET"
+    printf '%b 10. sing-box 生成密钥%b\n' "$SING_BOX_COLOR" "$RESET"
+    printf '%b 11. 开机自启并启动 sing-box%b\n\n' "$SING_BOX_COLOR" "$RESET"
     printf '  0. 退出\n'
     printf '======================================\n'
 }
@@ -227,42 +243,46 @@ main() {
 
         case "$choice" in
             1)
-                set_shanghai_timezone
+                install_common_tools
                 pause
                 ;;
             2)
-                run_stream_test
+                set_shanghai_timezone
                 pause
                 ;;
             3)
-                enable_bbr
+                run_stream_test
                 pause
                 ;;
             4)
-                verify_bbr
+                enable_bbr
                 pause
                 ;;
             5)
-                install_xray
+                verify_bbr
                 pause
                 ;;
             6)
-                generate_xray_key
+                install_xray
                 pause
                 ;;
             7)
-                start_xray
+                generate_xray_key
                 pause
                 ;;
             8)
-                install_sing_box
+                start_xray
                 pause
                 ;;
             9)
-                generate_sing_box_key
+                install_sing_box
                 pause
                 ;;
             10)
+                generate_sing_box_key
+                pause
+                ;;
+            11)
                 start_sing_box
                 pause
                 ;;
