@@ -23,14 +23,15 @@ PRIVATE_KEY=''
 PUBLIC_KEY=''
 SHORT_ID=''
 ENABLE_SITE_ROUTING=0
-ROUTING_PROTOCOL=''
 CLIENT_ADDRESS=''
 CLIENT_NAME=''
 VLESS_URL=''
 SERVER_PUBLIC_IPV4=''
 
-declare -a ROUTING_TAGS=("Nfproxy" "Disney" "pp")
-declare -a ROUTING_NAMES=("Netflix" "Disney/HBO/Blizzard/Bahamut/JavDB" "PayPal")
+declare -a ROUTING_KEYS=()
+declare -a ROUTING_TAGS=()
+declare -a ROUTING_NAMES=()
+declare -a ROUTING_PROTOCOLS=()
 declare -a ROUTING_ADDRESSES=()
 declare -a ROUTING_PORTS=()
 declare -a ROUTING_PASSWORDS=()
@@ -401,16 +402,23 @@ select_routing_protocol() {
         printf '请选择 [1-2]：'
         IFS= read -r choice || die "输入已中断。"
         case "$choice" in
-            1) ROUTING_PROTOCOL='trojan'; return 0 ;;
-            2) ROUTING_PROTOCOL='shadowsocks'; return 0 ;;
+            1) REPLY='trojan'; return 0 ;;
+            2) REPLY='shadowsocks'; return 0 ;;
             *) warn "请选择 1 或 2。" ;;
         esac
     done
 }
 
-collect_routing_server() {
-    local index=$1 name=${ROUTING_NAMES[$1]}
+add_routing_group() {
+    local key=$1 tag=$2 name=$3 index
+    index=${#ROUTING_KEYS[@]}
+    ROUTING_KEYS[$index]=$key
+    ROUTING_TAGS[$index]=$tag
+    ROUTING_NAMES[$index]=$name
+
     printf '\n---- %s 分流服务器 ----\n' "$name"
+    select_routing_protocol
+    ROUTING_PROTOCOLS[$index]=$REPLY
     prompt_domain "请输入 $name 分流服务器域名"
     ROUTING_ADDRESSES[$index]=$REPLY
     prompt_port "请输入 $name 分流服务器端口" 443
@@ -420,7 +428,7 @@ collect_routing_server() {
 }
 
 collect_configuration() {
-    local detected_ip='' index value
+    local detected_ip='' is_hong_kong=0 value
 
     detected_ip=$(curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)
     if is_valid_ipv4 "$detected_ip"; then
@@ -448,19 +456,39 @@ collect_configuration() {
     generate_short_id
 
     printf '\n%b========== 网站分流配置 ==========%b\n\n' "$GREEN" "$RESET"
-    if ask_yes_no '是否启用模板中的 Netflix、Disney/HBO 等和 PayPal 分流？' n; then
+    ENABLE_SITE_ROUTING=0
+    ROUTING_KEYS=()
+    ROUTING_TAGS=()
+    ROUTING_NAMES=()
+    ROUTING_PROTOCOLS=()
+    ROUTING_ADDRESSES=()
+    ROUTING_PORTS=()
+    ROUTING_PASSWORDS=()
+
+    if ask_yes_no '这台 VPS 是否为香港服务器？' n; then
+        is_hong_kong=1
         ENABLE_SITE_ROUTING=1
-        select_routing_protocol
-        for index in "${!ROUTING_TAGS[@]}"; do
-            collect_routing_server "$index"
-        done
-    else
-        ENABLE_SITE_ROUTING=0
-        ROUTING_PROTOCOL=''
-        ROUTING_ADDRESSES=()
-        ROUTING_PORTS=()
-        ROUTING_PASSWORDS=()
-        info "将删除网站代理分流规则及对应出站。广告、BT 和中国地址屏蔽规则仍会保留。"
+        info "香港服务器将强制加入以下分流：OpenAI、X、Yahoo、Google DeepMind、Google Gemini、TikTok。"
+        add_routing_group 'hongkong' 'hkProxy' '香港服务器专用（OpenAI、X、Yahoo、Google DeepMind、Google Gemini、TikTok）'
+    fi
+
+    if ask_yes_no '是否需要流媒体分流（Netflix、Disney）？' n; then
+        ENABLE_SITE_ROUTING=1
+        add_routing_group 'media' 'mediaProxy' '流媒体（Netflix、Disney）'
+    fi
+
+    if ask_yes_no '是否需要支付服务分流（PayPal）？' n; then
+        ENABLE_SITE_ROUTING=1
+        add_routing_group 'paypal' 'ppProxy' '支付服务（PayPal）'
+    fi
+
+    if ((is_hong_kong == 0)) && ask_yes_no '是否需要 AI 分流（OpenAI、X、Google DeepMind、Google Gemini）？' n; then
+        ENABLE_SITE_ROUTING=1
+        add_routing_group 'ai' 'aiProxy' 'AI（OpenAI、X、Google DeepMind、Google Gemini）'
+    fi
+
+    if ((ENABLE_SITE_ROUTING == 0)); then
+        info "未启用额外分流。广告、BT 和中国 IP 屏蔽规则仍会保留。"
     fi
 
     prompt_host '请输入客户端连接的服务器域名或 IP' "$detected_ip"
@@ -472,32 +500,53 @@ collect_configuration() {
 }
 
 write_routing_rules() {
-    if ((ENABLE_SITE_ROUTING == 1)); then
-        printf '%s' ',
-        {
-          "type": "field",
-          "domain": ["geosite:netflix"],
-          "outboundTag": "Nfproxy"
-        },
-        {
-          "type": "field",
-          "domain": [
-            "geosite:hbo",
-            "geosite:blizzard",
-            "geosite:bahamut",
-            "geosite:disney",
-            "geosite:javdb",
-            "domain:ribenyan.com",
-            "domain-suffix:ribenyan.com"
+    local index key tag
+    for index in "${!ROUTING_KEYS[@]}"; do
+        key=${ROUTING_KEYS[$index]}
+        tag=${ROUTING_TAGS[$index]}
+        case "$key" in
+            hongkong)
+                printf ',\n%s' "        {
+          \"type\": \"field\",
+          \"domain\": [
+            \"geosite:openai\",
+            \"geosite:x\",
+            \"geosite:yahoo\",
+            \"geosite:google-deepmind\",
+            \"geosite:google-gemini\",
+            \"geosite:tiktok\"
           ],
-          "outboundTag": "Disney"
-        },
-        {
-          "type": "field",
-          "domain": ["geosite:paypal"],
-          "outboundTag": "pp"
-        }'
-    fi
+          \"outboundTag\": \"$tag\"
+        }"
+                ;;
+            media)
+                printf ',\n%s' "        {
+          \"type\": \"field\",
+          \"domain\": [\"geosite:netflix\", \"geosite:disney\"],
+          \"outboundTag\": \"$tag\"
+        }"
+                ;;
+            paypal)
+                printf ',\n%s' "        {
+          \"type\": \"field\",
+          \"domain\": [\"geosite:paypal\"],
+          \"outboundTag\": \"$tag\"
+        }"
+                ;;
+            ai)
+                printf ',\n%s' "        {
+          \"type\": \"field\",
+          \"domain\": [
+            \"geosite:openai\",
+            \"geosite:x\",
+            \"geosite:google-deepmind\",
+            \"geosite:google-gemini\"
+          ],
+          \"outboundTag\": \"$tag\"
+        }"
+                ;;
+        esac
+    done
 }
 
 write_proxy_outbound() {
@@ -510,7 +559,7 @@ write_proxy_outbound() {
     json_escape "$address"; address=$REPLY
     json_escape "$password"; password=$REPLY
 
-    if [[ "$ROUTING_PROTOCOL" == 'trojan' ]]; then
+    if [[ "${ROUTING_PROTOCOLS[$index]}" == 'trojan' ]]; then
         printf ',\n%s' "    {
       \"tag\": \"$tag\",
       \"protocol\": \"trojan\",
