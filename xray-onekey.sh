@@ -36,6 +36,7 @@ declare -a ROUTING_PROTOCOLS=()
 declare -a ROUTING_ADDRESSES=()
 declare -a ROUTING_PORTS=()
 declare -a ROUTING_PASSWORDS=()
+declare -a SERVER_NAMES=()
 
 info() {
     printf '%b[信息]%b %s\n' "$BLUE" "$RESET" "$*"
@@ -328,33 +329,75 @@ generate_short_id() {
 }
 
 select_server_name() {
-    local choice
+    local input item existing duplicate
+    local -a candidates=()
+
+    SERVER_NAMES=()
     if is_valid_domain "$DEST_HOST" && ! is_valid_ipv4 "$DEST_HOST"; then
+        SERVER_NAME=$DEST_HOST
+        SERVER_NAMES=("$DEST_HOST")
+        info "已自动加入目标网站域名：$DEST_HOST"
+        warn "追加的域名必须被目标网站的 HTTPS 证书覆盖。"
+
+        if ! ask_yes_no '是否还要增加其他可用域名？' n; then
+            return 0
+        fi
+
         while true; do
-            printf '%s\n' \
-                'Reality 目标网站域名设置方式：' \
-                "  1. 使用刚才填写的 Reality 目标网站域名（${DEST_HOST}，默认）" \
-                '  2. 自定义域名'
-            printf '请选择 [1-2]（默认 1）：'
-            IFS= read -r choice || die "输入已中断。"
-            case "${choice:-1}" in
-                1)
-                    SERVER_NAME=$DEST_HOST
-                    return 0
-                    ;;
-                2)
-                    prompt_domain '请输入自定义的 Reality 目标网站域名'
-                    SERVER_NAME=$REPLY
-                    return 0
-                    ;;
-                *) warn "请选择 1 或 2。" ;;
-            esac
+            printf '请输入要增加的域名（多个域名用英文逗号分隔）：'
+            IFS= read -r input || die "输入已中断。"
+            IFS=',' read -r -a candidates <<<"$input"
+            ((${#candidates[@]} > 0)) || {
+                warn "请至少输入一个域名。"
+                continue
+            }
+
+            duplicate=0
+            for item in "${candidates[@]}"; do
+                item=${item#"${item%%[![:space:]]*}"}
+                item=${item%"${item##*[![:space:]]}"}
+                item=${item%.}
+                if ! is_valid_domain "$item" || is_valid_ipv4 "$item"; then
+                    warn "域名格式不正确：${item:-空值}"
+                    duplicate=1
+                    break
+                fi
+            done
+            ((duplicate == 0)) || continue
+
+            for item in "${candidates[@]}"; do
+                item=${item#"${item%%[![:space:]]*}"}
+                item=${item%"${item##*[![:space:]]}"}
+                item=${item%.}
+                item=${item,,}
+                duplicate=0
+                for existing in "${SERVER_NAMES[@]}"; do
+                    if [[ "$existing" == "$item" ]]; then
+                        duplicate=1
+                        break
+                    fi
+                done
+                ((duplicate == 1)) || SERVER_NAMES+=("$item")
+            done
+            return 0
         done
     fi
 
     info "前面填写的是 IP，请填写 Caddy/Nginx 网站证书对应的域名。"
     prompt_domain '请输入 Reality 目标网站域名'
     SERVER_NAME=$REPLY
+    SERVER_NAMES=("$SERVER_NAME")
+}
+
+build_server_names_json() {
+    local item escaped output='' separator=''
+    for item in "${SERVER_NAMES[@]}"; do
+        json_escape "$item"
+        escaped=$REPLY
+        output+="${separator}\"${escaped}\""
+        separator=', '
+    done
+    REPLY=$output
 }
 
 check_reality_dest() {
@@ -445,7 +488,7 @@ collect_configuration() {
     select_uuid
 
     while true; do
-        prompt_host '请输入 Reality 目标网站（如目标网站为本机的 Caddy 或 Nginx，则填入 127.0.0.1）'
+        prompt_host '请输入 Reality 目标网站的地址（如目标网站为本机的 Caddy 或 Nginx，则填入 127.0.0.1）'
         DEST_HOST=$REPLY
         prompt_port '请输入 Reality 目标网站的端口' 443
         DEST_PORT=$REPLY
@@ -615,10 +658,10 @@ write_proxy_outbound() {
 
 write_config() {
     local output_file=$1 index
-    local uuid dest_host server_name private_key short_id
+    local uuid dest_host server_names_json private_key short_id
     json_escape "$CLIENT_UUID"; uuid=$REPLY
     json_escape "$DEST_HOST"; dest_host=$REPLY
-    json_escape "$SERVER_NAME"; server_name=$REPLY
+    build_server_names_json; server_names_json=$REPLY
     json_escape "$PRIVATE_KEY"; private_key=$REPLY
     json_escape "$SHORT_ID"; short_id=$REPLY
 
@@ -663,7 +706,7 @@ write_config() {
           \"show\": false,
           \"dest\": \"$dest_host:$DEST_PORT\",
           \"xver\": 0,
-          \"serverNames\": [\"$server_name\"],
+          \"serverNames\": [$server_names_json],
           \"privateKey\": \"$private_key\",
           \"shortIds\": [\"\", \"$short_id\"]
         }
@@ -756,7 +799,7 @@ print_result() {
     printf 'Reality 端口：%s\n' "$REALITY_PORT"
     printf 'UUID：%s\n' "$CLIENT_UUID"
     printf 'Reality 目标网站：%s:%s\n' "$DEST_HOST" "$DEST_PORT"
-    printf 'Reality 目标网站域名：%s\n' "$SERVER_NAME"
+    printf 'Reality 目标网站域名：%s\n' "$(IFS='、'; printf '%s' "${SERVER_NAMES[*]}")"
     printf 'Reality 公钥/Password：%s\n' "$PUBLIC_KEY"
     printf 'shortId：%s\n\n' "$SHORT_ID"
     printf '%bPassWall2 / 客户端导入链接：%b\n%s\n' "$GREEN" "$RESET" "$VLESS_URL"
