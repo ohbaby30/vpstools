@@ -35,7 +35,7 @@ sudo ./vpstools.sh
 
 脚本支持安装 Xray 稳定版、交互生成 VLESS + REALITY 配置、按香港服务器/流媒体/PayPal/AI 场景选择分流、选择是否通过 `geoip:cn` 屏蔽回国流量，以及输出 PassWall2 可导入的 `vless://` 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
 
-交互过程按 Reality 入站配置、Reality 目标网站设置、网站分流配置、回国流量设置、客户端链接生成和应用配置分区显示。其中 UUID、密钥、公钥与 shortId 均在 Reality 入站配置阶段生成。客户端连接地址和节点名称仅用于生成客户端导入链接，不会写入 Xray 服务端配置。
+交互过程按 Reality 入站配置、Reality 目标网站设置、网站分流配置、回国流量设置、客户端链接生成和应用配置分区显示。其中客户端 ID、密钥、公钥与 shortId 均在 Reality 入站配置阶段生成。客户端 ID 可以自动生成 UUID，也可以手动填写有效 UUID，或填写长度为 1–30 位、仅包含英文字母和数字的自定义 ID。客户端连接地址和节点名称仅用于生成客户端导入链接，不会写入 Xray 服务端配置。
 
 ### 尚未安装 Xray
 
