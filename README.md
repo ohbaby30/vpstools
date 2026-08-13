@@ -35,6 +35,8 @@ sudo ./vpstools.sh
 
 脚本支持安装 Xray 稳定版、交互生成 VLESS + REALITY 配置、按香港服务器/流媒体/PayPal/AI 场景选择分流、选择是否通过 `geoip:cn` 屏蔽回国流量，以及输出 PassWall2 可导入的 `vless://` 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
 
+交互过程按 Reality 入站配置、Reality 目标网站设置、网站分流配置、回国流量设置、客户端设置和应用配置分区显示。其中 UUID、密钥、公钥与 shortId 均在 Reality 入站配置阶段生成。
+
 ### 尚未安装 Xray
 
 使用 Bash + curl 直接运行：
@@ -94,7 +96,8 @@ sudo ./xray-onekey.sh --skip-install
 
 ```text
 Reality 监听端口：443
-Reality 目标网站的地址：127.0.0.1
+是否使用本机 Caddy/Nginx 网站作为 Reality 目标网站：是
+Reality 目标网站的地址：自动设置为 127.0.0.1
 Reality 目标网站的端口：44422
 Reality 目标网站域名：Caddy 或 Nginx 证书对应的域名
 客户端连接地址：VPS 公网 IP 或指向该 VPS 的域名
