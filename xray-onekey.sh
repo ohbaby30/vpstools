@@ -498,13 +498,19 @@ collect_configuration() {
         if ask_yes_no '是否使用本机 Caddy/Nginx 网站作为 Reality 目标网站？' n; then
             DEST_HOST='127.0.0.1'
             info "Reality 目标网站地址已设置为：127.0.0.1"
+            prompt_port '请输入本机 Caddy/Nginx 的 HTTPS 监听端口' 443
+            DEST_PORT=$REPLY
+            warn "该域名必须与 Caddy/Nginx 的 HTTPS 证书匹配。"
+            prompt_domain '请输入本机 Caddy/Nginx 网站使用的 HTTPS 域名'
+            SERVER_NAME=$REPLY
+            SERVER_NAMES=("$SERVER_NAME")
         else
             prompt_host '请输入 Reality 目标网站的地址（域名或 IP）'
             DEST_HOST=$REPLY
+            prompt_port '请输入 Reality 目标网站的端口' 443
+            DEST_PORT=$REPLY
+            select_server_name
         fi
-        prompt_port '请输入 Reality 目标网站的端口' 443
-        DEST_PORT=$REPLY
-        select_server_name
         check_reality_dest && break
     done
 
@@ -554,11 +560,12 @@ collect_configuration() {
         info "不会生成 geoip:cn 屏蔽规则。"
     fi
 
-    section_header '客户端设置'
-    prompt_host '请输入客户端连接的服务器域名或 IP' "$detected_ip"
+    section_header '客户端链接生成'
+    info "以下内容仅用于生成客户端导入链接，不会写入 Xray 服务端配置。"
+    prompt_host '请输入客户端连接地址（VPS 公网 IP 或解析到该 VPS 的域名）' "$detected_ip"
     CLIENT_ADDRESS=$REPLY
 
-    printf '请输入节点名称（默认 Xray-Reality）：'
+    printf '请输入客户端节点名称（仅用于客户端显示，默认 Xray-Reality）：'
     IFS= read -r value || die "输入已中断。"
     CLIENT_NAME=${value:-Xray-Reality}
 }
