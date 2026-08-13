@@ -132,6 +132,10 @@ is_valid_uuid() {
     [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
 }
 
+is_valid_custom_id() {
+    [[ "$1" =~ ^[A-Za-z0-9]{1,30}$ ]]
+}
+
 is_valid_ipv4() {
     local value=$1 part
     local -a parts
@@ -279,9 +283,12 @@ install_xray() {
 }
 
 select_uuid() {
-    local choice custom
+    local choice custom mapped_uuid
     while true; do
-        printf '%s\n' 'UUID 生成方式：' '  1. 自动生成（推荐）' '  2. 手动填写'
+        printf '%s\n' \
+            '客户端 ID 设置方式：' \
+            '  1. 自动生成 UUID（推荐）' \
+            '  2. 自定义 UUID'
         printf '请选择 [1-2]：'
         IFS= read -r choice || die "输入已中断。"
         case "$choice" in
@@ -293,13 +300,25 @@ select_uuid() {
                 ;;
             2)
                 while true; do
-                    printf '请输入 UUID：'
+                    printf '请输入 UUID 或英文数字 ID（1-30 个字符）：'
                     IFS= read -r custom || die "输入已中断。"
                     if is_valid_uuid "$custom"; then
                         CLIENT_UUID=${custom,,}
+                        success "已使用自定义 UUID：$CLIENT_UUID"
                         return 0
                     fi
-                    warn "UUID 格式不正确。示例：123e4567-e89b-42d3-a456-426614174000"
+                    if is_valid_custom_id "$custom"; then
+                        mapped_uuid=$(xray uuid -i "$custom" 2>/dev/null | tr -d '[:space:]')
+                        if ! is_valid_uuid "$mapped_uuid"; then
+                            warn "Xray 无法识别该自定义 ID，请重新输入。"
+                            continue
+                        fi
+                        CLIENT_UUID=$custom
+                        success "已使用自定义 ID：$CLIENT_UUID"
+                        info "该 ID 对应的映射 UUID：$mapped_uuid"
+                        return 0
+                    fi
+                    warn "请输入有效 UUID，或仅包含英文字母和数字的 1-30 位 ID。"
                 done
                 ;;
             *) warn "请选择 1 或 2。" ;;
@@ -721,7 +740,7 @@ write_config() {
         \"security\": \"reality\",
         \"realitySettings\": {
           \"show\": false,
-          \"dest\": \"$dest_host:$DEST_PORT\",
+          \"target\": \"$dest_host:$DEST_PORT\",
           \"xver\": 0,
           \"serverNames\": [$server_names_json],
           \"privateKey\": \"$private_key\",
@@ -814,7 +833,7 @@ print_result() {
     section_header '部署完成'
     printf '配置文件：%s\n' "$XRAY_CONFIG_FILE"
     printf 'Reality 端口：%s\n' "$REALITY_PORT"
-    printf 'UUID：%s\n' "$CLIENT_UUID"
+    printf '客户端 ID：%s\n' "$CLIENT_UUID"
     printf 'Reality 目标网站：%s:%s\n' "$DEST_HOST" "$DEST_PORT"
     printf 'Reality 目标网站域名：%s\n' "$(IFS='、'; printf '%s' "${SERVER_NAMES[*]}")"
     printf 'Reality 公钥/Password：%s\n' "$PUBLIC_KEY"
