@@ -329,12 +329,12 @@ generate_short_id() {
 
 select_server_name() {
     local choice
-    if is_valid_domain "$DEST_HOST"; then
+    if is_valid_domain "$DEST_HOST" && ! is_valid_ipv4 "$DEST_HOST"; then
         while true; do
             printf '%s\n' \
-                'Reality 伪装域名设置方式：' \
-                "  1. 与前面填写的伪装域名相同（$DEST_HOST）" \
-                '  2. 自定义伪装域名'
+                'Reality 目标网站域名设置方式：' \
+                "  1. 使用刚才填写的 Reality 目标网站域名（${DEST_HOST}，默认）" \
+                '  2. 自定义域名'
             printf '请选择 [1-2]（默认 1）：'
             IFS= read -r choice || die "输入已中断。"
             case "${choice:-1}" in
@@ -343,7 +343,7 @@ select_server_name() {
                     return 0
                     ;;
                 2)
-                    prompt_domain '请输入 Reality 伪装域名'
+                    prompt_domain '请输入自定义的 Reality 目标网站域名'
                     SERVER_NAME=$REPLY
                     return 0
                     ;;
@@ -352,8 +352,8 @@ select_server_name() {
         done
     fi
 
-    info "前面填写的是 IP，请在这里填写 Caddy/网站证书对应的伪装域名。"
-    prompt_domain '请输入 Reality 伪装域名'
+    info "前面填写的是 IP，请填写 Caddy/Nginx 网站证书对应的域名。"
+    prompt_domain '请输入 Reality 目标网站域名'
     SERVER_NAME=$REPLY
 }
 
@@ -368,12 +368,12 @@ check_reality_dest() {
     if ((DEST_PORT == REALITY_PORT)) &&
        { [[ "$DEST_HOST" == '127.0.0.1' || "$DEST_HOST" == '::1' ]] ||
          { [[ -n "$SERVER_PUBLIC_IPV4" ]] && grep -Fqx "$SERVER_PUBLIC_IPV4" <<<"$resolved_ipv4"; }; }; then
-        warn "Reality 伪装目标 $dest 指向本机，端口又与 Reality 监听端口相同。"
-        warn "如果偷同机 Caddy，请填写 Caddy 实际监听的另一个 HTTPS 端口。"
+        warn "Reality 目标网站 $dest 指向本机，端口又与 Reality 监听端口相同。"
+        warn "如果目标网站是同机 Caddy/Nginx，请填写它实际监听的另一个 HTTPS 端口。"
         return 1
     fi
 
-    info "正在测试 Reality 伪装目标：${dest}（伪装域名：${SERVER_NAME}）"
+    info "正在测试 Reality 目标网站：${dest}（网站域名：${SERVER_NAME}）"
     if [[ "$SERVER_NAME" == "$DEST_HOST" ]]; then
         if command -v timeout >/dev/null 2>&1; then
             timeout 20 xray tls ping "$dest" >/dev/null 2>&1 && check_ok=0
@@ -386,10 +386,10 @@ check_reality_dest() {
             "https://${SERVER_NAME}:${DEST_PORT}/" >/dev/null 2>&1 && check_ok=0
     fi
     if ((check_ok == 0)); then
-        success "Reality 伪装目标 TLS 测试通过。"
+        success "Reality 目标网站 TLS 测试通过。"
     else
-        warn "未能确认伪装目标的 TLS 响应或证书，可能是地址、端口、伪装域名、证书或网络问题。"
-        ask_yes_no "仍然使用伪装目标 $dest 和伪装域名 $SERVER_NAME 吗？" n || return 1
+        warn "未能确认目标网站的 TLS 响应或证书，可能是地址、端口、网站域名、证书或网络问题。"
+        ask_yes_no "仍然使用目标网站 $dest 和网站域名 $SERVER_NAME 吗？" n || return 1
     fi
 }
 
@@ -445,9 +445,9 @@ collect_configuration() {
     select_uuid
 
     while true; do
-        prompt_host '请输入 Reality 伪装域名或 IP（本机 Caddy 可填 127.0.0.1）'
+        prompt_host '请输入 Reality 目标网站（如目标网站为本机的 Caddy 或 Nginx，则填入 127.0.0.1）'
         DEST_HOST=$REPLY
-        prompt_port '请输入 Reality 伪装域名端口' 443
+        prompt_port '请输入 Reality 目标网站的端口' 443
         DEST_PORT=$REPLY
         select_server_name
         check_reality_dest && break
@@ -755,8 +755,8 @@ print_result() {
     printf '配置文件：%s\n' "$XRAY_CONFIG_FILE"
     printf 'Reality 端口：%s\n' "$REALITY_PORT"
     printf 'UUID：%s\n' "$CLIENT_UUID"
-    printf 'Reality 伪装目标：%s:%s\n' "$DEST_HOST" "$DEST_PORT"
-    printf 'Reality 伪装域名：%s\n' "$SERVER_NAME"
+    printf 'Reality 目标网站：%s:%s\n' "$DEST_HOST" "$DEST_PORT"
+    printf 'Reality 目标网站域名：%s\n' "$SERVER_NAME"
     printf 'Reality 公钥/Password：%s\n' "$PUBLIC_KEY"
     printf 'shortId：%s\n\n' "$SHORT_ID"
     printf '%bPassWall2 / 客户端导入链接：%b\n%s\n' "$GREEN" "$RESET" "$VLESS_URL"
