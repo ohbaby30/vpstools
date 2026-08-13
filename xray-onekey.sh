@@ -50,6 +50,10 @@ warn() {
     printf '%b[提示]%b %s\n' "$YELLOW" "$RESET" "$*"
 }
 
+section_header() {
+    printf '\n%b========== %s ==========%b\n\n' "$GREEN" "$1" "$RESET"
+}
+
 die() {
     printf '%b[错误]%b %s\n' "$RED" "$RESET" "$*" >&2
     exit 1
@@ -482,24 +486,29 @@ collect_configuration() {
         SERVER_PUBLIC_IPV4=''
     fi
 
-    printf '\n%b========== Reality 入站配置 ==========%b\n\n' "$GREEN" "$RESET"
+    section_header 'Reality 入站配置'
     prompt_port '请输入 Reality 监听端口' 443
     REALITY_PORT=$REPLY
     select_uuid
+    generate_reality_keys
+    generate_short_id
 
+    section_header 'Reality 目标网站设置'
     while true; do
-        prompt_host '请输入 Reality 目标网站的地址（如目标网站为本机的 Caddy 或 Nginx，则填入 127.0.0.1）'
-        DEST_HOST=$REPLY
+        if ask_yes_no '是否使用本机 Caddy/Nginx 网站作为 Reality 目标网站？' n; then
+            DEST_HOST='127.0.0.1'
+            info "Reality 目标网站地址已设置为：127.0.0.1"
+        else
+            prompt_host '请输入 Reality 目标网站的地址（域名或 IP）'
+            DEST_HOST=$REPLY
+        fi
         prompt_port '请输入 Reality 目标网站的端口' 443
         DEST_PORT=$REPLY
         select_server_name
         check_reality_dest && break
     done
 
-    generate_reality_keys
-    generate_short_id
-
-    printf '\n%b========== 网站分流配置 ==========%b\n\n' "$GREEN" "$RESET"
+    section_header '网站分流配置'
     ENABLE_SITE_ROUTING=0
     ROUTING_KEYS=()
     ROUTING_TAGS=()
@@ -535,7 +544,7 @@ collect_configuration() {
         info "未启用额外分流。广告和 BT 屏蔽规则仍会保留。"
     fi
 
-    printf '\n%b========== 回国流量设置 ==========%b\n\n' "$GREEN" "$RESET"
+    section_header '回国流量设置'
     warn "屏蔽回国流量会阻止目标 IP 属于中国大陆的连接，可能带来意想不到的问题，请慎用。"
     if ask_yes_no '是否需要屏蔽回国流量（geoip:cn IP 检测）？' n; then
         BLOCK_CN_IP=1
@@ -545,6 +554,7 @@ collect_configuration() {
         info "不会生成 geoip:cn 屏蔽规则。"
     fi
 
+    section_header '客户端设置'
     prompt_host '请输入客户端连接的服务器域名或 IP' "$detected_ip"
     CLIENT_ADDRESS=$REPLY
 
@@ -794,7 +804,7 @@ build_vless_url() {
 
 print_result() {
     build_vless_url
-    printf '\n%b========== 部署完成 ==========%b\n\n' "$GREEN" "$RESET"
+    section_header '部署完成'
     printf '配置文件：%s\n' "$XRAY_CONFIG_FILE"
     printf 'Reality 端口：%s\n' "$REALITY_PORT"
     printf 'UUID：%s\n' "$CLIENT_UUID"
@@ -815,8 +825,10 @@ main() {
     ask_yes_no '确认继续吗？' y || exit 0
 
     if ((SKIP_INSTALL == 0)); then
+        section_header '安装 Xray'
         install_xray
     else
+        section_header '检查 Xray'
         require_command xray
         info "已跳过安装，使用现有版本：$(xray version | head -n 1)"
     fi
@@ -824,6 +836,7 @@ main() {
 
     while true; do
         collect_configuration
+        section_header '应用配置'
         if install_configuration; then
             print_result
             return 0
