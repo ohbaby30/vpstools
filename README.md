@@ -92,13 +92,13 @@ sudo ./xray-onekey.sh --skip-install
 
 ## 使用同机 Caddy 或 Nginx 作为 REALITY 目标网站
 
-例如 Xray 监听 `443`，Caddy HTTPS 监听 `44422`，可以这样填写：
+例如 Xray 监听 `443`，Caddy HTTPS 监听 `12345`，可以这样填写：
 
 ```text
 Reality 监听端口：443
 是否使用本机 Caddy/Nginx 网站作为 Reality 目标网站：是
 Reality 目标网站的地址：自动设置为 127.0.0.1
-Reality 目标网站的端口：44422
+Reality 目标网站的端口：12345
 Reality 目标网站域名：Caddy 或 Nginx 证书对应的域名
 客户端连接地址：VPS 公网 IP 或指向该 VPS 的域名
 ```
