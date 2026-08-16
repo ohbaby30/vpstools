@@ -277,66 +277,18 @@ detect_arch() {
 }
 
 # 获取最新正式版版本号(通过 releases/latest 302 重定向,不依赖 api)
+# 注意:set -e 下 curl 失败会让脚本静默退出,必须用 || true 兜底
 get_latest_stable_version() {
-    local redirect_version
+    local redirect_version=''
     redirect_version=$(curl -4fsSL -o /dev/null -w '%{url_effective}' \
         --connect-timeout 5 --max-time 12 \
         -L "https://github.com/${SING_BOX_REPO}/releases/latest" 2>/dev/null \
-        | sed -E 's|.*/tag/v||')
+        | sed -E 's|.*/tag/v||') || true
     if [[ "$redirect_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         REPLY=$redirect_version
         return 0
     fi
     die "无法获取 sing-box 最新正式版版本号(访问 github.com 失败)。请检查网络后重试。"
-}
-
-# 获取最新测试版(beta)版本号:从 releases API 找第一个 prerelease
-# 若 API 不可用,回退到正式版
-get_latest_beta_version() {
-    local beta_version
-    beta_version=$(curl -4fsSL --connect-timeout 8 --max-time 20 \
-        "https://api.github.com/repos/${SING_BOX_REPO}/releases?per_page=10" 2>/dev/null \
-        | awk -F'"tag_name"[[:space:]]*:[[:space:]]*"v' 'NF>=2 {print $2; exit}' \
-        | cut -d'"' -f1)
-    if [[ "$beta_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
-        REPLY=$beta_version
-        return 0
-    fi
-    warn "无法获取测试版版本号(api.github.com 不可用)，回退到正式版。"
-    get_latest_stable_version
-}
-
-# 选择安装通道:正式版(稳定)或测试版(beta)
-# 设置全局变量 RELEASE_CHANNEL='stable' 或 'beta',RELEASE_VERSION=版本号
-select_version_channel() {
-    local choice
-    while true; do
-        printf '%s\n' \
-            '选择 sing-box 版本：' \
-            '  1. 正式版（稳定，当前推荐）' \
-            '  2. 测试版（beta，最新特性，可能有 bug）'
-        printf '请选择 [1-2]：'
-        IFS= read -r choice || die "输入已中断。"
-        case "$choice" in
-            1|'')
-                RELEASE_CHANNEL='stable'
-                info "正在获取最新正式版版本号……"
-                get_latest_stable_version
-                RELEASE_VERSION=$REPLY
-                success "已选择正式版：v${RELEASE_VERSION}"
-                return 0
-                ;;
-            2)
-                RELEASE_CHANNEL='beta'
-                info "正在获取最新测试版版本号……"
-                get_latest_beta_version
-                RELEASE_VERSION=$REPLY
-                success "已选择测试版：v${RELEASE_VERSION}"
-                return 0
-                ;;
-            *) warn "请选择 1 或 2。" ;;
-        esac
-    done
 }
 
 install_singbox() {
@@ -348,8 +300,10 @@ install_singbox() {
     detect_arch
     arch=$REPLY
 
-    select_version_channel
-    version=$RELEASE_VERSION
+    info "正在获取 sing-box 最新正式版版本号……"
+    get_latest_stable_version
+    version=$REPLY
+    info "安装正式版：v${version}"
 
     url="https://github.com/${SING_BOX_REPO}/releases/download/v${version}/sing-box-${version}-linux-${arch}.tar.gz"
     tmpdir=$(mktemp -d /tmp/sing-box-install.XXXXXX)
@@ -368,8 +322,10 @@ install_singbox() {
 }
 
 # 准备 rule-set 缓存目录(remote 规则集由 sing-box 首次启动时自动下载)
+# 必须提前创建:1.14 及以后版本,目录不存在会导致启动失败
 prepare_cache_dir() {
     mkdir -p "$CACHE_DIR"
+    chmod 700 "$CACHE_DIR"
     success "规则集缓存目录已就绪：$CACHE_DIR"
 }
 
@@ -740,21 +696,8 @@ write_cn_ip_block_rule() {
     fi
 }
 
-# 检测 sing-box 主版本,决定是否启用 http_clients(1.14+ 新增)
-# 返回值:0 = 支持(1.14+), 1 = 不支持(1.13-或未安装)
-singbox_has_http_clients() {
-    local ver='' major minor
-    if command -v sing-box >/dev/null 2>&1; then
-        ver=$(sing-box version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+' | head -n 1 || true)
-    fi
-    [[ -z "$ver" ]] && return 1
-    major=${ver%%.*}
-    minor=${ver#*.}; minor=${minor%%.*}
-    if ((major > 1)) || { ((major == 1)) && ((minor >= 14)); }; then
-        return 0
-    fi
-    return 1
-}
+# 是否输出 http_clients(1.14+ 特性;1.13 正式版不识别该字段,必须设为 0)
+USE_HTTP_CLIENTS=0
 
 write_rule_set_declarations() {
     local index key name output='' separator=''
@@ -877,12 +820,9 @@ write_config() {
     json_escape "$PRIVATE_KEY"; private_key=$REPLY
     json_escape "$SHORT_ID"; short_id=$REPLY
     write_rule_set_declarations; rule_set_decls=$REPLY
-    if singbox_has_http_clients; then
-        use_http_clients=1
-        info "检测到 sing-box 1.14+，启用 http_clients（规则集下载走直连）。"
-    else
-        use_http_clients=0
-        info "检测到 sing-box 1.13-，使用兼容配置（无 http_clients）。"
+    use_http_clients=$USE_HTTP_CLIENTS
+    if ((use_http_clients == 1)); then
+        info "已启用 http_clients（规则集下载走直连）。"
     fi
 
     {
