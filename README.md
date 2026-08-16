@@ -107,7 +107,7 @@ REALITY 的监听端口与同机目标网站端口不能相同，否则会回连
 
 如果目标网站填写的是域名，脚本会自动保留该域名，并询问是否增加其他被 HTTPS 证书覆盖的可用域名。如果目标网站填写的是 `127.0.0.1` 或其他 IP，只需填写一个证书对应域名，不会继续询问附加域名。
 
-sing-box 一键部署
+## sing-box 一键部署
 
 sing-box VLESS + REALITY 交互式一键部署脚本，功能与 Xray 版一致，内核替换为 sing-box。支持安装时选择正式版（稳定）或测试版（beta，含最新特性），交互生成 VLESS + REALITY 配置，按香港服务器/流媒体/PayPal/AI 场景选择分流，选择是否通过 geoip:cn 屏蔽回国流量，以及输出 PassWall2 可导入的 vless:// 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
 
@@ -115,7 +115,7 @@ sing-box VLESS + REALITY 交互式一键部署脚本，功能与 Xray 版一致�
 
 sing-box 1.12+ 已移除内置 geoip/geosite 数据库，本脚本使用 rule-set 规则集（MetaCubeX 源，首次启动自动下载并每日更新），并启用 cache_file 缓存与 QUIC 丢弃、流量嗅探。若安装测试版（1.14+），配置将包含 http_clients（规则集下载走直连）；正式版（1.13-）则生成兼容配置。
 
-尚未安装 sing-box
+### 尚未安装 sing-box
 
 使用 Bash + curl 直接运行：
 
@@ -129,7 +129,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/s
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)"
 ```
 
-已经安装 sing-box
+### 已经安装 sing-box
 
 跳过安装，只重新生成并应用配置：
 
@@ -143,7 +143,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/s
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)" -- --skip-install
 ```
 
-下载后运行
+### 下载后运行
 
 ```bash
 curl -fL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh -o sing-box-onekey.sh
