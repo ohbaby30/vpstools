@@ -106,3 +106,81 @@ Reality 目标网站的地址：自动设置为 127.0.0.1
 REALITY 的监听端口与同机目标网站端口不能相同，否则会回连 Xray 自身。
 
 如果目标网站填写的是域名，脚本会自动保留该域名，并询问是否增加其他被 HTTPS 证书覆盖的可用域名。如果目标网站填写的是 `127.0.0.1` 或其他 IP，只需填写一个证书对应域名，不会继续询问附加域名。
+
+ing-box 一键部署
+
+sing-box VLESS + REALITY 交互式一键部署脚本，功能与 Xray 版一致，内核替换为 sing-box。支持安装时选择正式版（稳定）或测试版（beta，含最新特性），交互生成 VLESS + REALITY 配置，按香港服务器/流媒体/PayPal/AI 场景选择分流，选择是否通过 geoip:cn 屏蔽回国流量，以及输出 PassWall2 可导入的 vless:// 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
+
+交互过程按 Reality 入站配置、Reality 目标网站设置、网站分流配置、回国流量设置、客户端链接生成和应用配置分区显示。其中客户端 ID、密钥、公钥与 shortId 均在 Reality 入站配置阶段生成。客户端 ID 可以自动生成 UUID，也可以手动填写有效 UUID。客户端连接地址和节点名称仅用于生成客户端导入链接，不会写入 sing-box 服务端配置。
+
+sing-box 1.12+ 已移除内置 geoip/geosite 数据库，本脚本使用 rule-set 规则集（MetaCubeX 源，首次启动自动下载并每日更新），并启用 cache_file 缓存与 QUIC 丢弃、流量嗅探。若安装测试版（1.14+），配置将包含 http_clients（规则集下载走直连）；正式版（1.13-）则生成兼容配置。
+
+尚未安装 sing-box
+
+使用 Bash + curl 直接运行：
+
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)"
+
+
+非 root 用户：
+
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)"
+
+
+已经安装 sing-box
+
+跳过安装，只重新生成并应用配置：
+
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)" -- --skip-install
+
+
+非 root 用户：
+
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)" -- --skip-install
+
+
+下载后运行
+
+curl -fL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh -o sing-box-onekey.sh
+chmod +x sing-box-onekey.sh
+
+
+安装 sing-box 并配置：
+
+sudo ./sing-box-onekey.sh
+
+
+跳过安装，只配置现有 sing-box：
+
+sudo ./sing-box-onekey.sh --skip-install
+
+
+查看帮助：
+
+./sing-box-onekey.sh --help
+
+
+选择正式版或测试版
+
+脚本安装时会询问选择版本：
+
+- 正式版：最新稳定版（当前为 1.13.x）
+- 测试版：最新 beta 版（当前为 1.14.0-beta.x，含 http_clients 等新特性）
+
+版本号自动从 GitHub Releases 获取，不写死；后续 1.14 转正后脚本自动跟随，无需修改。
+
+使用同机 Caddy 或 Nginx 作为 REALITY 目标网站
+
+例如 sing-box 监听 443，Caddy HTTPS 监听 12345，可以这样填写：
+
+Reality 监听端口：443
+是否使用本机 Caddy/Nginx 网站作为 Reality 目标网站：是
+Reality 目标网站的地址：自动设置为 127.0.0.1
+本机 Caddy/Nginx 的 HTTPS 监听端口：12345
+本机 Caddy/Nginx 网站使用的 HTTPS 域名：Caddy 或 Nginx 证书对应的域名
+客户端连接地址：VPS 公网 IP 或指向该 VPS 的域名
+
+
+REALITY 的监听端口与同机目标网站端口不能相同，否则会回连 sing-box 自身。
+
+如果目标网站填写的是域名，脚本会自动保留该域名，并询问是否增加其他被 HTTPS 证书覆盖的可用域名。如果目标网站填写的是 127.0.0.1 或其他 IP，只需填写一个证书对应域名，不会继续询问附加域名。
