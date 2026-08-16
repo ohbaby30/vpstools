@@ -8,6 +8,7 @@ readonly STREAM_TEST_URL="https://raw.githubusercontent.com/lmc999/RegionRestric
 readonly XRAY_INSTALL_URL="https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
 readonly XRAY_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh"
 readonly SING_BOX_INSTALL_URL="https://sing-box.app/install.sh"
+readonly SING_BOX_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh"
 readonly RESET='\033[0m'
 readonly BOLD='\033[1m'
 readonly META_COLOR='\033[1;33m'
@@ -199,6 +200,19 @@ start_sing_box() {
     systemctl --no-pager --full status sing-box || true
 }
 
+run_sing_box_onekey() {
+    clear
+    printf '========== sing-box Reality 一键安装 ==========\n\n'
+    require_root || return 1
+    require_command curl || return 1
+    info "脚本来源：$SING_BOX_ONEKEY_URL"
+    confirm_system_change "将从 GitHub 下载并以 root 身份执行 sing-box Reality 一键安装脚本。" || {
+        info "已取消。"
+        return 0
+    }
+    bash <(curl -4 -fsSL "$SING_BOX_ONEKEY_URL")
+}
+
 set_shanghai_timezone() {
     clear
     printf '========== Debian 校准时间 ==========\n\n'
@@ -243,7 +257,8 @@ show_menu() {
     printf '%b【sing-box 工具】%b\n' "$SING_BOX_COLOR" "$RESET"
     printf '%b 10. 安装 sing-box 稳定版%b\n' "$SING_BOX_COLOR" "$RESET"
     printf '%b 11. sing-box 生成密钥%b\n' "$SING_BOX_COLOR" "$RESET"
-    printf '%b 12. 开机自启并启动 sing-box%b\n\n' "$SING_BOX_COLOR" "$RESET"
+    printf '%b 12. 开机自启并启动 sing-box%b\n' "$SING_BOX_COLOR" "$RESET"
+    printf '%b 13. sing-box Reality 一键安装%b\n\n' "$SING_BOX_COLOR" "$RESET"
     printf '  0. 退出\n'
     printf '======================================\n'
 }
@@ -303,6 +318,10 @@ main() {
                 ;;
             12)
                 start_sing_box
+                pause
+                ;;
+            13)
+                run_sing_box_onekey
                 pause
                 ;;
             0)
