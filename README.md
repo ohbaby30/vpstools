@@ -4,6 +4,7 @@
 
 - `vpstools.sh`：VPS 常用工具菜单
 - `xray-onekey.sh`：Xray VLESS + REALITY 交互式一键部署脚本
+- `sing-box-onekey.sh`：sing-box VLESS + REALITY 交互式一键部署脚本
 
 > 建议先阅读脚本内容，并在测试环境确认后再使用。涉及安装软件、修改系统配置和重启服务的功能需要 root 权限。
 
@@ -33,9 +34,18 @@ sudo ./vpstools.sh
 
 ## Xray 一键部署
 
-脚本支持安装 Xray 稳定版、交互生成 VLESS + REALITY 配置、按香港服务器/流媒体/PayPal/AI 场景选择分流、选择是否通过 `geoip:cn` 屏蔽回国流量，以及输出 PassWall2 可导入的 `vless://` 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
+脚本支持在安装时选择 Xray 正式稳定版或 Beta 预发布版，交互生成 VLESS + REALITY 配置、按香港服务器/流媒体/PayPal/AI 场景选择分流、选择是否通过 `geoip:cn` 屏蔽回国流量，以及输出 PassWall2 可导入的 `vless://` 链接。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。
 
 交互过程按 Reality 入站配置、Reality 目标网站设置、网站分流配置、回国流量设置、客户端链接生成和应用配置分区显示。其中客户端 ID、密钥、公钥与 shortId 均在 Reality 入站配置阶段生成。客户端 ID 可以自动生成 UUID，也可以手动填写有效 UUID，或填写长度为 1–30 位、仅包含英文字母和数字的自定义 ID。客户端连接地址和节点名称仅用于生成客户端导入链接，不会写入 Xray 服务端配置。
+
+非香港服务器选择 AI 分流时，规则使用 `geosite:category-ai-!cn`；香港服务器则保留脚本预设的香港专用分流规则。
+
+### 选择正式版或 Beta 预发布版
+
+安装阶段会出现版本选择：
+
+- 正式稳定版（默认、推荐）：执行官方 `install -u root`。
+- Beta 预发布版：执行官方 `install -u root --beta`，适合需要测试新特性时使用。
 
 ### 尚未安装 Xray
 
@@ -168,14 +178,16 @@ sudo ./sing-box-onekey.sh --skip-install
 ./sing-box-onekey.sh --help
 ```
 
-选择正式版或测试版
+### 选择正式版或测试版
 
 脚本安装时会询问选择版本：
 
-- 正式版：最新稳定版（当前为 1.13.x）
-- 测试版：最新 beta 版（当前为 1.14.0-beta.x，含 http_clients 等新特性）
+- 正式版：官方最新稳定版
+- 测试版：官方最新 Beta 预发布版，可能包含未稳定的新特性
 
-版本号自动从 GitHub Releases 获取，不写死；后续 1.14 转正后脚本自动跟随，无需修改。
+版本号自动从 GitHub Releases 获取，不写死。
+
+非香港服务器选择 AI 分流时，规则使用 MetaCubeX 的 `category-ai-!cn` rule-set；香港服务器则保留脚本预设的香港专用分流规则。
 
 使用同机 Caddy 或 Nginx 作为 REALITY 目标网站
 
