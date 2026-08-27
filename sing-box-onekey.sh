@@ -2,10 +2,16 @@
 
 set -Eeuo pipefail
 
-readonly SCRIPT_NAME="Xray VLESS + REALITY 一键部署脚本"
-readonly XRAY_INSTALL_URL="https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
-readonly XRAY_CONFIG_DIR="/usr/local/etc/xray"
-readonly XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
+readonly SCRIPT_NAME="sing-box VLESS + REALITY 一键部署脚本"
+readonly SING_BOX_REPO="SagerNet/sing-box"
+readonly CONFIG_DIR="/usr/local/etc/sing-box"
+readonly CONFIG_FILE="${CONFIG_DIR}/config.json"
+readonly CACHE_DIR="/var/lib/sing-box"
+readonly SERVICE_NAME="sing-box"
+
+# rule-set 使用 remote 类型(MetaCubeX 源),sing-box 首次启动自动下载并缓存
+readonly GEOSITE_RS_BASE="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite"
+readonly GEOIP_RS_BASE="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip"
 
 readonly RED='\033[1;31m'
 readonly GREEN='\033[1;32m'
@@ -14,7 +20,6 @@ readonly BLUE='\033[1;34m'
 readonly RESET='\033[0m'
 
 SKIP_INSTALL=0
-XRAY_RELEASE_CHANNEL='stable'
 REALITY_PORT=''
 CLIENT_UUID=''
 DEST_HOST=''
@@ -38,7 +43,6 @@ declare -a ROUTING_ADDRESSES=()
 declare -a ROUTING_PORTS=()
 declare -a ROUTING_PASSWORDS=()
 declare -a SERVER_NAMES=()
-declare -a XRAY_INSTALL_ARGS=()
 
 info() {
     printf '%b[信息]%b %s\n' "$BLUE" "$RESET" "$*"
@@ -66,7 +70,7 @@ usage() {
         "用法：sudo bash $0 [选项]" \
         '' \
         '选项：' \
-        '  --skip-install  跳过 Xray 安装，仅重新生成配置' \
+        '  --skip-install  跳过 sing-box 安装，仅重新生成配置' \
         '  -h, --help      显示帮助'
 }
 
@@ -132,10 +136,6 @@ is_valid_port() {
 
 is_valid_uuid() {
     [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
-}
-
-is_valid_custom_id() {
-    [[ "$1" =~ ^[A-Za-z0-9]{1,30}$ ]]
 }
 
 is_valid_ipv4() {
@@ -266,62 +266,94 @@ url_encode() {
     REPLY=$encoded
 }
 
-select_xray_release() {
-    local choice
-    while true; do
-        printf '%s\n' \
-            'Xray 安装版本：' \
-            '  1. 正式稳定版（推荐）' \
-            '  2. Beta 预发布版（可能含未稳定功能）'
-        printf '请选择 [1-2]（默认 1）：'
-        IFS= read -r choice || die "输入已中断。"
-        case "$choice" in
-            1|'')
-                XRAY_RELEASE_CHANNEL='stable'
-                return 0
-                ;;
-            2)
-                XRAY_RELEASE_CHANNEL='beta'
-                return 0
-                ;;
-            *) warn "请输入 1 或 2。" ;;
-        esac
-    done
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) REPLY='amd64' ;;
+        aarch64|arm64) REPLY='arm64' ;;
+        armv7l|armhf) REPLY='armv7' ;;
+        i386|i686) REPLY='386' ;;
+        *) die "不支持的 CPU 架构：$(uname -m)" ;;
+    esac
 }
 
-build_xray_install_args() {
-    XRAY_INSTALL_ARGS=(install -u root)
-    if [[ "$XRAY_RELEASE_CHANNEL" == 'beta' ]]; then
-        XRAY_INSTALL_ARGS+=(--beta)
+# 获取最新正式版版本号(通过 releases/latest 302 重定向,不依赖 api)
+# 注意:set -e 下 curl 失败会让脚本静默退出,必须用 || true 兜底
+get_latest_stable_version() {
+    local redirect_version=''
+    redirect_version=$(curl -4fsSL -o /dev/null -w '%{url_effective}' \
+        --connect-timeout 5 --max-time 12 \
+        -L "https://github.com/${SING_BOX_REPO}/releases/latest" 2>/dev/null \
+        | sed -E 's|.*/tag/v||') || true
+    if [[ "$redirect_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        REPLY=$redirect_version
+        return 0
     fi
+    die "无法获取 sing-box 最新正式版版本号(访问 github.com 失败)。请检查网络后重试。"
 }
 
-install_xray() {
-    local installer
+install_singbox() {
+    local arch version url tmpdir
     require_command curl
-    build_xray_install_args
-    installer=$(mktemp /tmp/xray-install.XXXXXX.sh)
-    trap 'rm -f "${installer:-}"' RETURN
+    require_command tar
+    require_command install
 
-    info "正在下载 Xray 官方安装脚本……"
-    curl -fL --retry 3 --connect-timeout 15 "$XRAY_INSTALL_URL" -o "$installer"
-    chmod 700 "$installer"
-    if [[ "$XRAY_RELEASE_CHANNEL" == 'beta' ]]; then
-        warn "将安装 Xray Beta 预发布版。"
-    else
-        info "将安装 Xray 正式稳定版。"
-    fi
-    info "正在安装 Xray，并将 systemd 服务用户设置为 root……"
-    bash "$installer" "${XRAY_INSTALL_ARGS[@]}"
-    rm -f "$installer"
+    detect_arch
+    arch=$REPLY
+
+    info "正在获取 sing-box 最新正式版版本号……"
+    get_latest_stable_version
+    version=$REPLY
+    info "安装正式版：v${version}"
+
+    url="https://github.com/${SING_BOX_REPO}/releases/download/v${version}/sing-box-${version}-linux-${arch}.tar.gz"
+    tmpdir=$(mktemp -d /tmp/sing-box-install.XXXXXX)
+    trap 'rm -rf "${tmpdir:-}"' RETURN
+
+    info "正在下载 sing-box v${version}（${arch}）……"
+    curl -4fL --retry 3 --connect-timeout 10 --max-time 120 "$url" -o "$tmpdir/sing-box.tar.gz" \
+        || die "sing-box 下载失败，请检查网络后重试。"
+    tar -xzf "$tmpdir/sing-box.tar.gz" -C "$tmpdir"
+    install -m 755 "$tmpdir"/sing-box-*/sing-box /usr/local/bin/sing-box
+    rm -rf "$tmpdir"
     trap - RETURN
 
-    require_command xray
-    success "Xray 安装完成：$(xray version | head -n 1)"
+    require_command sing-box
+    success "sing-box 安装完成：$(sing-box version | head -n 1)"
+}
+
+# 准备 rule-set 缓存目录(remote 规则集由 sing-box 首次启动时自动下载)
+# 必须提前创建:1.14 及以后版本,目录不存在会导致启动失败
+prepare_cache_dir() {
+    mkdir -p "$CACHE_DIR"
+    chmod 700 "$CACHE_DIR"
+    success "规则集缓存目录已就绪：$CACHE_DIR"
+}
+
+install_systemd_service() {
+    cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
+[Unit]
+Description=sing-box service
+Documentation=https://sing-box.sagernet.org
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+ExecStart=/usr/local/bin/sing-box run -c ${CONFIG_FILE}
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    success "systemd 服务已创建：${SERVICE_NAME}.service"
 }
 
 select_uuid() {
-    local choice custom mapped_uuid
+    local choice custom
     while true; do
         printf '%s\n' \
             '客户端 ID 设置方式：' \
@@ -331,32 +363,21 @@ select_uuid() {
         IFS= read -r choice || die "输入已中断。"
         case "$choice" in
             1|'')
-                CLIENT_UUID=$(xray uuid | tr -d '[:space:]')
-                is_valid_uuid "$CLIENT_UUID" || die "Xray 自动生成的 UUID 格式异常。"
+                CLIENT_UUID=$(sing-box generate uuid | tr -d '[:space:]')
+                is_valid_uuid "$CLIENT_UUID" || die "sing-box 自动生成的 UUID 格式异常。"
                 success "已生成 UUID：$CLIENT_UUID"
                 return 0
                 ;;
             2)
                 while true; do
-                    printf '请输入 UUID 或英文数字 ID（1-30 个字符）：'
+                    printf '请输入 UUID（标准格式，如 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）：'
                     IFS= read -r custom || die "输入已中断。"
                     if is_valid_uuid "$custom"; then
                         CLIENT_UUID=${custom,,}
                         success "已使用自定义 UUID：$CLIENT_UUID"
                         return 0
                     fi
-                    if is_valid_custom_id "$custom"; then
-                        mapped_uuid=$(xray uuid -i "$custom" 2>/dev/null | tr -d '[:space:]')
-                        if ! is_valid_uuid "$mapped_uuid"; then
-                            warn "Xray 无法识别该自定义 ID，请重新输入。"
-                            continue
-                        fi
-                        CLIENT_UUID=$custom
-                        success "已使用自定义 ID：$CLIENT_UUID"
-                        info "该 ID 对应的映射 UUID：$mapped_uuid"
-                        return 0
-                    fi
-                    warn "请输入有效 UUID，或仅包含英文字母和数字的 1-30 位 ID。"
+                    warn "请输入有效的标准 UUID。"
                 done
                 ;;
             *) warn "请选择 1 或 2。" ;;
@@ -366,25 +387,27 @@ select_uuid() {
 
 generate_reality_keys() {
     local output
-    output=$(xray x25519 2>&1) || {
+    output=$(sing-box generate reality-keypair 2>&1) || {
         printf '%s\n' "$output" >&2
-        die "执行 xray x25519 失败。"
+        die "执行 sing-box generate reality-keypair 失败。"
     }
 
-    PRIVATE_KEY=$(awk -F':[[:space:]]*' 'tolower($1) ~ /^private[ _-]*key$/ {print $2; exit}' <<<"$output")
-    PUBLIC_KEY=$(awk -F':[[:space:]]*' 'tolower($1) ~ /public/ || tolower($1) ~ /^password/ {print $2; exit}' <<<"$output")
+    PRIVATE_KEY=$(awk -F':[[:space:]]*' 'tolower($1) ~ /private/ {print $2; exit}' <<<"$output")
+    PUBLIC_KEY=$(awk -F':[[:space:]]*' 'tolower($1) ~ /public/ {print $2; exit}' <<<"$output")
 
     [[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || {
         printf '%s\n' "$output" >&2
-        die "无法识别 xray x25519 的输出格式。"
+        die "无法识别 sing-box reality-keypair 的输出格式。"
     }
     success "Reality 密钥已生成，私钥将自动写入服务端配置。"
     info "客户端需要的公钥/Password：$PUBLIC_KEY"
 }
 
 generate_short_id() {
-    SHORT_ID=$(xray uuid | tr -d '-' | cut -c 1-16)
-    SHORT_ID=${SHORT_ID,,}
+    SHORT_ID=$(sing-box generate rand 16 --hex 2>/dev/null | tr -d '[:space:]' || true)
+    if [[ ! "$SHORT_ID" =~ ^[0-9a-f]{16}$ ]]; then
+        SHORT_ID=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c 1-16)
+    fi
     [[ "$SHORT_ID" =~ ^[0-9a-f]{16}$ ]] || die "shortId 生成失败。"
     success "已生成 shortId：$SHORT_ID"
 }
@@ -479,13 +502,10 @@ check_reality_dest() {
 
     info "正在测试 Reality 目标网站：${dest}（网站域名：${SERVER_NAME}）"
     if [[ "$SERVER_NAME" == "$DEST_HOST" ]]; then
-        if command -v timeout >/dev/null 2>&1; then
-            timeout 20 xray tls ping "$dest" >/dev/null 2>&1 && check_ok=0
-        else
-            xray tls ping "$dest" >/dev/null 2>&1 && check_ok=0
-        fi
+        curl -4fsSI --noproxy '*' --connect-timeout 8 --max-time 15 \
+            "https://${DEST_HOST}:${DEST_PORT}/" >/dev/null 2>&1 && check_ok=0
     elif [[ "$DEST_HOST" != *:* ]]; then
-        curl -sSI --noproxy '*' --connect-timeout 8 --max-time 15 \
+        curl -4fsSI --noproxy '*' --connect-timeout 8 --max-time 15 \
             --connect-to "${SERVER_NAME}:${DEST_PORT}:${DEST_HOST}:${DEST_PORT}" \
             "https://${SERVER_NAME}:${DEST_PORT}/" >/dev/null 2>&1 && check_ok=0
     fi
@@ -503,7 +523,7 @@ select_routing_protocol() {
         printf '%s\n' \
             '分流服务器协议：' \
             '  1. Trojan + TLS' \
-            '  2. Shadowsocks（ss-rust，aes-256-gcm）'
+            '  2. Shadowsocks（sing-box 内置，aes-256-gcm）'
         printf '请选择 [1-2]：'
         IFS= read -r choice || die "输入已中断。"
         case "$choice" in
@@ -618,13 +638,13 @@ collect_configuration() {
     fi
 
     section_header '客户端链接生成'
-    info "以下内容仅用于生成客户端导入链接，不会写入 Xray 服务端配置。"
+    info "以下内容仅用于生成客户端导入链接，不会写入 sing-box 服务端配置。"
     prompt_host '请输入客户端连接地址（VPS 公网 IP 或解析到该 VPS 的域名）' "$detected_ip"
     CLIENT_ADDRESS=$REPLY
 
-    printf '请输入客户端节点名称（仅用于客户端显示，默认 Xray-Reality）：'
+    printf '请输入客户端节点名称（仅用于客户端显示，默认 sing-box-Reality）：'
     IFS= read -r value || die "输入已中断。"
-    CLIENT_NAME=${value:-Xray-Reality}
+    CLIENT_NAME=${value:-sing-box-Reality}
 }
 
 write_routing_rules() {
@@ -635,37 +655,30 @@ write_routing_rules() {
         case "$key" in
             hongkong)
                 printf ',\n%s' "        {
-          \"type\": \"field\",
-          \"domain\": [
-            \"geosite:openai\",
-            \"geosite:x\",
-            \"geosite:yahoo\",
-            \"geosite:google-deepmind\",
-            \"geosite:google-gemini\",
-            \"geosite:tiktok\"
-          ],
-          \"outboundTag\": \"$tag\"
+          \"rule_set\": [\"openai\", \"x\", \"yahoo\", \"google-deepmind\", \"google-gemini\", \"tiktok\"],
+          \"action\": \"route\",
+          \"outbound\": \"$tag\"
         }"
                 ;;
             media)
                 printf ',\n%s' "        {
-          \"type\": \"field\",
-          \"domain\": [\"geosite:netflix\", \"geosite:disney\"],
-          \"outboundTag\": \"$tag\"
+          \"rule_set\": [\"netflix\", \"disney\"],
+          \"action\": \"route\",
+          \"outbound\": \"$tag\"
         }"
                 ;;
             paypal)
                 printf ',\n%s' "        {
-          \"type\": \"field\",
-          \"domain\": [\"geosite:paypal\"],
-          \"outboundTag\": \"$tag\"
+          \"rule_set\": [\"paypal\"],
+          \"action\": \"route\",
+          \"outbound\": \"$tag\"
         }"
                 ;;
             ai)
                 printf ',\n%s' "        {
-          \"type\": \"field\",
-          \"domain\": [\"geosite:category-ai-!cn\"],
-          \"outboundTag\": \"$tag\"
+          \"rule_set\": [\"category-ai-!cn\"],
+          \"action\": \"route\",
+          \"outbound\": \"$tag\"
         }"
                 ;;
         esac
@@ -676,11 +689,89 @@ write_cn_ip_block_rule() {
     if ((BLOCK_CN_IP == 1)); then
         printf '%s' ',
       {
-        "type": "field",
-        "ip": ["geoip:cn"],
-        "outboundTag": "block"
+        "rule_set": ["geoip-cn"],
+        "action": "reject",
+        "method": "drop"
       }'
     fi
+}
+
+# 是否输出 http_clients(1.14+ 特性;1.13 正式版不识别该字段,必须设为 0)
+USE_HTTP_CLIENTS=0
+
+write_rule_set_declarations() {
+    local index key name output='' separator=''
+    local base="$GEOSITE_RS_BASE" ip_base="$GEOIP_RS_BASE"
+
+    # 始终需要:广告屏蔽
+    output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"category-ads-all\",
+      \"format\": \"binary\",
+      \"url\": \"${base}/category-ads-all.srs\",
+      \"update_interval\": \"1d\"
+    }"
+    separator=','
+    if ((BLOCK_CN_IP == 1)); then
+        output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"geoip-cn\",
+      \"format\": \"binary\",
+      \"url\": \"${ip_base}/cn.srs\",
+      \"update_interval\": \"1d\"
+    }"
+        separator=','
+    fi
+    for index in "${!ROUTING_KEYS[@]}"; do
+        key=${ROUTING_KEYS[$index]}
+        case "$key" in
+            hongkong)
+                for name in openai x yahoo google-deepmind google-gemini tiktok; do
+                    output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"${name}\",
+      \"format\": \"binary\",
+      \"url\": \"${base}/${name}.srs\",
+      \"update_interval\": \"1d\"
+    }"
+                    separator=','
+                done
+                ;;
+            media)
+                for name in netflix disney; do
+                    output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"${name}\",
+      \"format\": \"binary\",
+      \"url\": \"${base}/${name}.srs\",
+      \"update_interval\": \"1d\"
+    }"
+                    separator=','
+                done
+                ;;
+            paypal)
+                output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"paypal\",
+      \"format\": \"binary\",
+      \"url\": \"${base}/paypal.srs\",
+      \"update_interval\": \"1d\"
+    }"
+                separator=','
+                ;;
+            ai)
+                output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"category-ai-!cn\",
+      \"format\": \"binary\",
+      \"url\": \"${base}/category-ai-!cn.srs\",
+      \"update_interval\": \"1d\"
+    }"
+                separator=','
+                ;;
+        esac
+    done
+    REPLY=$output
 }
 
 write_proxy_outbound() {
@@ -695,157 +786,186 @@ write_proxy_outbound() {
 
     if [[ "${ROUTING_PROTOCOLS[$index]}" == 'trojan' ]]; then
         printf ',\n%s' "    {
+      \"type\": \"trojan\",
       \"tag\": \"$tag\",
-      \"protocol\": \"trojan\",
-      \"settings\": {
-        \"address\": \"$address\",
-        \"port\": $port,
-        \"password\": \"$password\"
-      },
-      \"streamSettings\": {
-        \"network\": \"tcp\",
-        \"security\": \"tls\",
-        \"tlsSettings\": {
-          \"serverName\": \"$address\",
-          \"allowInsecure\": false
-        }
+      \"server\": \"$address\",
+      \"server_port\": $port,
+      \"password\": \"$password\",
+      \"tls\": {
+        \"enabled\": true,
+        \"server_name\": \"$address\"
       }
     }"
     else
         printf ',\n%s' "    {
+      \"type\": \"shadowsocks\",
       \"tag\": \"$tag\",
-      \"protocol\": \"shadowsocks\",
-      \"settings\": {
-        \"address\": \"$address\",
-        \"port\": $port,
-        \"method\": \"aes-256-gcm\",
-        \"password\": \"$password\"
-      }
+      \"server\": \"$address\",
+      \"server_port\": $port,
+      \"method\": \"aes-256-gcm\",
+      \"password\": \"$password\",
+      \"network\": \"tcp\"
     }"
     fi
 }
 
 write_config() {
     local output_file=$1 index
-    local uuid dest_host server_names_json private_key short_id
+    local uuid dest_host server_name private_key short_id rule_set_decls use_http_clients
     json_escape "$CLIENT_UUID"; uuid=$REPLY
     json_escape "$DEST_HOST"; dest_host=$REPLY
-    build_server_names_json; server_names_json=$REPLY
+    json_escape "$SERVER_NAME"; server_name=$REPLY
     json_escape "$PRIVATE_KEY"; private_key=$REPLY
     json_escape "$SHORT_ID"; short_id=$REPLY
+    write_rule_set_declarations; rule_set_decls=$REPLY
+    use_http_clients=$USE_HTTP_CLIENTS
+    if ((use_http_clients == 1)); then
+        info "已启用 http_clients（规则集下载走直连）。"
+    fi
 
     {
         printf '%s' '{
-  "routing": {
-    "domainStrategy": "IPIfNonMatch",
-    "rules": [
-      {
-        "type": "field",
-        "protocol": ["bittorrent"],
-        "outboundTag": "block"
-      },
-      {
-        "type": "field",
-        "domain": ["geosite:category-ads-all"],
-        "outboundTag": "block"
-      }'
-        write_cn_ip_block_rule
-        write_routing_rules
-        printf '%s' "
-    ]
+  "log": {
+    "level": "info",
+    "timestamp": true
   },
-  \"inbounds\": [
+  "inbounds": [
     {
-      \"listen\": \"0.0.0.0\",
-      \"port\": $REALITY_PORT,
-      \"protocol\": \"vless\",
-      \"settings\": {
-        \"clients\": [
-          {
-            \"id\": \"$uuid\",
-            \"flow\": \"xtls-rprx-vision\"
-          }
-        ],
-        \"decryption\": \"none\"
-      },
-      \"streamSettings\": {
-        \"network\": \"tcp\",
-        \"security\": \"reality\",
-        \"realitySettings\": {
-          \"show\": false,
-          \"target\": \"$dest_host:$DEST_PORT\",
-          \"xver\": 0,
-          \"serverNames\": [$server_names_json],
-          \"privateKey\": \"$private_key\",
-          \"shortIds\": [\"\", \"$short_id\"]
+      "type": "vless",
+      "tag": "vless-reality-in",
+      "listen": "0.0.0.0",
+      "listen_port": '"$REALITY_PORT"',
+      "users": [
+        {
+          "name": "sing-box",
+          "uuid": "'"$uuid"'",
+          "flow": "xtls-rprx-vision"
         }
-      },
-      \"sniffing\": {
-        \"enabled\": true,
-        \"destOverride\": [\"http\", \"tls\", \"quic\"],
-        \"routeOnly\": true
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "'"$server_name"'",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "'"$dest_host"'",
+            "server_port": '"$DEST_PORT"'
+          },
+          "private_key": "'"$private_key"'",
+          "short_id": ["", "'"$short_id"'"]
+        }
       }
     }
   ],
-  \"outbounds\": [
+  "outbounds": [
     {
-      \"protocol\": \"freedom\",
-      \"tag\": \"direct\"
-    },
-    {
-      \"protocol\": \"blackhole\",
-      \"tag\": \"block\"
-    }"
+      "type": "direct",
+      "tag": "direct"
+    }'
         if ((ENABLE_SITE_ROUTING == 1)); then
             for index in "${!ROUTING_TAGS[@]}"; do
                 write_proxy_outbound "$index"
             done
         fi
-        printf '\n%s\n' '  ]' '}'
+        printf '%s' '
+  ]'
+        if ((use_http_clients == 1)); then
+            printf '%s' ',
+  "http_clients": [
+    {
+      "tag": "rule-set-direct",
+      "detour": "direct"
+    }
+  ]'
+        fi
+        printf '%s' ',
+  "route": {'
+        if ((use_http_clients == 1)); then
+            printf '%s' '
+    "default_http_client": "rule-set-direct",'
+        fi
+        printf '%s' '
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": ["quic"],
+        "action": "reject",
+        "method": "drop"
+      },
+      {
+        "rule_set": ["category-ads-all"],
+        "action": "reject",
+        "method": "drop"
+      },
+      {
+        "protocol": ["bittorrent"],
+        "action": "reject",
+        "method": "drop"
+      }'
+        write_cn_ip_block_rule
+        write_routing_rules
+        printf '%s' '
+    ],
+    "rule_set": ['
+        printf '%s' "$rule_set_decls"
+        printf '%s' '
+    ],
+    "final": "direct"
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "/var/lib/sing-box/cache.db"
+    }
+  }
+}
+'
     } >"$output_file"
     chmod 600 "$output_file"
 }
 
 install_configuration() {
     local temp_dir temp_config backup_file='' timestamp test_output
-    mkdir -p "$XRAY_CONFIG_DIR"
-    temp_dir=$(mktemp -d "${XRAY_CONFIG_DIR}/.config-build.XXXXXX")
+    mkdir -p "$CONFIG_DIR"
+    temp_dir=$(mktemp -d "${CONFIG_DIR}/.config-build.XXXXXX")
     temp_config="${temp_dir}/config.json"
     write_config "$temp_config"
 
-    info "正在检查 Xray 配置……"
-    if ! test_output=$(xray run -test -config "$temp_config" 2>&1); then
+    info "正在检查 sing-box 配置……"
+    if ! test_output=$(sing-box check -c "$temp_config" 2>&1); then
         printf '%s\n' "$test_output" >&2
         rm -f "$temp_config"
         rmdir "$temp_dir" 2>/dev/null || true
-        die "生成的配置未通过 Xray 检查，原配置没有被修改。"
+        die "生成的配置未通过 sing-box 检查，原配置没有被修改。"
     fi
-    success "Xray 配置检查通过。"
+    success "sing-box 配置检查通过。"
 
-    if [[ -f "$XRAY_CONFIG_FILE" ]]; then
+    if [[ -f "$CONFIG_FILE" ]]; then
         timestamp=$(date +%Y%m%d-%H%M%S)
-        backup_file="${XRAY_CONFIG_FILE}.bak.${timestamp}"
-        cp -a "$XRAY_CONFIG_FILE" "$backup_file"
+        backup_file="${CONFIG_FILE}.bak.${timestamp}"
+        cp -a "$CONFIG_FILE" "$backup_file"
         info "旧配置已备份到：$backup_file"
     fi
-    mv -f "$temp_config" "$XRAY_CONFIG_FILE"
+    mv -f "$temp_config" "$CONFIG_FILE"
     rmdir "$temp_dir" 2>/dev/null || true
-    chmod 600 "$XRAY_CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
 
     systemctl daemon-reload
-    systemctl enable xray >/dev/null
-    if systemctl restart xray && systemctl is-active --quiet xray; then
-        success "Xray 已设置为开机自启并成功启动。"
-        systemctl --no-pager --full status xray || true
+    systemctl enable "$SERVICE_NAME" >/dev/null
+    if systemctl restart "$SERVICE_NAME" && systemctl is-active --quiet "$SERVICE_NAME"; then
+        success "sing-box 已设置为开机自启并成功启动。"
+        systemctl --no-pager --full status "$SERVICE_NAME" || true
         return 0
     fi
 
-    warn "Xray 启动失败，最近的服务日志如下："
-    journalctl -u xray --no-pager -n 50 || true
+    warn "sing-box 启动失败，最近的服务日志如下："
+    journalctl -u "$SERVICE_NAME" --no-pager -n 50 || true
     if [[ -n "$backup_file" && -f "$backup_file" ]]; then
         warn "正在恢复启动前的配置：$backup_file"
-        cp -a "$backup_file" "$XRAY_CONFIG_FILE"
-        systemctl restart xray >/dev/null 2>&1 || true
+        cp -a "$backup_file" "$CONFIG_FILE"
+        systemctl restart "$SERVICE_NAME" >/dev/null 2>&1 || true
     fi
     return 1
 }
@@ -864,7 +984,7 @@ build_vless_url() {
 print_result() {
     build_vless_url
     section_header '部署完成'
-    printf '配置文件：%s\n' "$XRAY_CONFIG_FILE"
+    printf '配置文件：%s\n' "$CONFIG_FILE"
     printf 'Reality 端口：%s\n' "$REALITY_PORT"
     printf '客户端 ID：%s\n' "$CLIENT_UUID"
     printf 'Reality 目标网站：%s:%s\n' "$DEST_HOST" "$DEST_PORT"
@@ -880,22 +1000,24 @@ main() {
     require_root
     require_linux_systemd
     printf '%b========== %s ==========%b\n' "$GREEN" "$SCRIPT_NAME" "$RESET"
-    warn "脚本会安装 Xray、生成 Reality 配置并重启 xray 服务。"
+    warn "脚本会安装 sing-box、生成 Reality 配置并重启 sing-box 服务。"
     ask_yes_no '确认继续吗？' y || exit 0
 
     if ((SKIP_INSTALL == 0)); then
-        section_header '安装 Xray'
-        select_xray_release
-        install_xray
+        section_header '安装 sing-box'
+        install_singbox
+        install_systemd_service
     else
-        section_header '检查 Xray'
-        require_command xray
-        info "已跳过安装，使用现有版本：$(xray version | head -n 1)"
+        section_header '检查 sing-box'
+        require_command sing-box
+        info "已跳过安装，使用现有版本：$(sing-box version | head -n 1)"
     fi
     require_command curl
 
     while true; do
         collect_configuration
+        section_header '准备规则集缓存'
+        prepare_cache_dir
         section_header '应用配置'
         if install_configuration; then
             print_result
