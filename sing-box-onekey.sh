@@ -8,6 +8,7 @@ readonly CONFIG_DIR="/usr/local/etc/sing-box"
 readonly CONFIG_FILE="${CONFIG_DIR}/config.json"
 readonly CACHE_DIR="/var/lib/sing-box"
 readonly SERVICE_NAME="sing-box"
+readonly BACKUP_KEEP_COUNT=3
 
 # rule-set 使用 remote 类型(MetaCubeX 源),sing-box 首次启动自动下载并缓存
 readonly GEOSITE_RS_BASE="https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite"
@@ -33,7 +34,6 @@ BLOCK_CN_IP=0
 CLIENT_ADDRESS=''
 CLIENT_NAME=''
 VLESS_URL=''
-SERVER_PUBLIC_IPV4=''
 
 declare -a ROUTING_KEYS=()
 declare -a ROUTING_TAGS=()
@@ -307,7 +307,8 @@ install_singbox() {
 
     url="https://github.com/${SING_BOX_REPO}/releases/download/v${version}/sing-box-${version}-linux-${arch}.tar.gz"
     tmpdir=$(mktemp -d /tmp/sing-box-install.XXXXXX)
-    trap 'rm -rf "${tmpdir:-}"' RETURN
+    # 无论安装成功还是因错误退出，都只清理本函数创建的临时安装目录。
+    trap "rm -rf -- '$tmpdir'" EXIT
 
     info "正在下载 sing-box v${version}（${arch}）……"
     curl -4fL --retry 3 --connect-timeout 10 --max-time 120 "$url" -o "$tmpdir/sing-box.tar.gz" \
@@ -315,7 +316,7 @@ install_singbox() {
     tar -xzf "$tmpdir/sing-box.tar.gz" -C "$tmpdir"
     install -m 755 "$tmpdir"/sing-box-*/sing-box /usr/local/bin/sing-box
     rm -rf "$tmpdir"
-    trap - RETURN
+    trap - EXIT
 
     require_command sing-box
     success "sing-box 安装完成：$(sing-box version | head -n 1)"
@@ -484,20 +485,41 @@ build_server_names_json() {
     REPLY=$output
 }
 
+is_local_ip_address() {
+    local address=$1 route_output=''
+
+    if [[ "$address" == *:* ]]; then
+        route_output=$(ip -6 route get "$address" 2>/dev/null || true)
+    else
+        route_output=$(ip -4 route get "$address" 2>/dev/null || true)
+    fi
+    [[ "$route_output" == local\ * ]]
+}
+
 check_reality_dest() {
     local dest="${DEST_HOST}:${DEST_PORT}"
     local check_ok=1
-    local resolved_ipv4=''
+    local resolved_addresses='' candidate
 
-    if command -v getent >/dev/null 2>&1; then
-        resolved_ipv4=$(getent ahostsv4 "$DEST_HOST" 2>/dev/null | awk '{print $1}' | sort -u || true)
-    fi
-    if ((DEST_PORT == REALITY_PORT)) &&
-       { [[ "$DEST_HOST" == '127.0.0.1' || "$DEST_HOST" == '::1' ]] ||
-         { [[ -n "$SERVER_PUBLIC_IPV4" ]] && grep -Fqx "$SERVER_PUBLIC_IPV4" <<<"$resolved_ipv4"; }; }; then
-        warn "Reality 目标网站 $dest 指向本机，端口又与 Reality 监听端口相同。"
-        warn "如果目标网站是同机 Caddy/Nginx，请填写它实际监听的另一个 HTTPS 端口。"
-        return 1
+    if ((DEST_PORT == REALITY_PORT)); then
+        require_command ip
+        if command -v getent >/dev/null 2>&1; then
+            resolved_addresses=$( {
+                getent ahostsv4 "$DEST_HOST" 2>/dev/null || true
+                getent ahostsv6 "$DEST_HOST" 2>/dev/null || true
+            } | awk '{print $1}' | sort -u)
+        fi
+        if [[ -z "$resolved_addresses" ]]; then
+            resolved_addresses=${DEST_HOST#[}
+            resolved_addresses=${resolved_addresses%]}
+        fi
+        for candidate in $resolved_addresses; do
+            if is_local_ip_address "$candidate"; then
+                warn "Reality 目标网站 $dest 指向本机，端口又与 Reality 监听端口相同。"
+                warn "如果目标网站是同机 Caddy/Nginx，请填写它实际监听的另一个 HTTPS 端口。"
+                return 1
+            fi
+        done
     fi
 
     info "正在测试 Reality 目标网站：${dest}（网站域名：${SERVER_NAME}）"
@@ -556,11 +578,8 @@ collect_configuration() {
     local detected_ip='' is_hong_kong=0 value
 
     detected_ip=$(curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)
-    if is_valid_ipv4 "$detected_ip"; then
-        SERVER_PUBLIC_IPV4=$detected_ip
-    else
+    if ! is_valid_ipv4 "$detected_ip"; then
         detected_ip=''
-        SERVER_PUBLIC_IPV4=''
     fi
 
     section_header 'Reality 入站配置'
@@ -709,9 +728,6 @@ write_cn_ip_block_rule() {
     fi
 }
 
-# 是否输出 http_clients(1.14+ 特性;1.13 正式版不识别该字段,必须设为 0)
-USE_HTTP_CLIENTS=0
-
 write_rule_set_declarations() {
     local index key name output='' separator=''
     local base="$GEOSITE_RS_BASE" ip_base="$GEOIP_RS_BASE"
@@ -834,17 +850,13 @@ write_proxy_outbound() {
 
 write_config() {
     local output_file=$1 index
-    local uuid dest_host server_name private_key short_id rule_set_decls use_http_clients
+    local uuid dest_host server_name private_key short_id rule_set_decls
     json_escape "$CLIENT_UUID"; uuid=$REPLY
     json_escape "$DEST_HOST"; dest_host=$REPLY
     json_escape "$SERVER_NAME"; server_name=$REPLY
     json_escape "$PRIVATE_KEY"; private_key=$REPLY
     json_escape "$SHORT_ID"; short_id=$REPLY
     write_rule_set_declarations; rule_set_decls=$REPLY
-    use_http_clients=$USE_HTTP_CLIENTS
-    if ((use_http_clients == 1)); then
-        info "已启用 http_clients（规则集下载走直连）。"
-    fi
 
     {
         printf '%s' '{
@@ -892,21 +904,8 @@ write_config() {
         fi
         printf '%s' '
   ]'
-        if ((use_http_clients == 1)); then
-            printf '%s' ',
-  "http_clients": [
-    {
-      "tag": "rule-set-direct",
-      "detour": "direct"
-    }
-  ]'
-        fi
         printf '%s' ',
   "route": {'
-        if ((use_http_clients == 1)); then
-            printf '%s' '
-    "default_http_client": "rule-set-direct",'
-        fi
         printf '%s' '
     "rules": [
       {
@@ -949,6 +948,23 @@ write_config() {
     chmod 600 "$output_file"
 }
 
+prune_config_backups() {
+    local config_file=$1 index had_nullglob=0 IFS=$'\n'
+    local -a backups=()
+
+    shopt -q nullglob && had_nullglob=1
+    shopt -s nullglob
+    backups=("${config_file}.bak."*)
+    ((had_nullglob)) || shopt -u nullglob
+
+    ((${#backups[@]} > BACKUP_KEEP_COUNT)) || return 0
+    backups=($(printf '%s\n' "${backups[@]}" | sort -r))
+    for ((index = BACKUP_KEEP_COUNT; index < ${#backups[@]}; index++)); do
+        rm -f -- "${backups[index]}"
+    done
+    info "仅保留最近 ${BACKUP_KEEP_COUNT} 份配置备份。"
+}
+
 install_configuration() {
     local temp_dir temp_config backup_file='' timestamp test_output
     mkdir -p "$CONFIG_DIR"
@@ -970,6 +986,7 @@ install_configuration() {
         backup_file="${CONFIG_FILE}.bak.${timestamp}"
         cp -a "$CONFIG_FILE" "$backup_file"
         info "旧配置已备份到：$backup_file"
+        prune_config_backups "$CONFIG_FILE"
     fi
     mv -f "$temp_config" "$CONFIG_FILE"
     rmdir "$temp_dir" 2>/dev/null || true
