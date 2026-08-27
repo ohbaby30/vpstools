@@ -6,6 +6,7 @@ readonly SCRIPT_NAME="Xray VLESS + REALITY 一键部署脚本"
 readonly XRAY_INSTALL_URL="https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
 readonly XRAY_CONFIG_DIR="/usr/local/etc/xray"
 readonly XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
+readonly BACKUP_KEEP_COUNT=3
 
 readonly RED='\033[1;31m'
 readonly GREEN='\033[1;32m'
@@ -28,7 +29,6 @@ BLOCK_CN_IP=0
 CLIENT_ADDRESS=''
 CLIENT_NAME=''
 VLESS_URL=''
-SERVER_PUBLIC_IPV4=''
 
 declare -a ROUTING_KEYS=()
 declare -a ROUTING_TAGS=()
@@ -301,7 +301,8 @@ install_xray() {
     require_command curl
     build_xray_install_args
     installer=$(mktemp /tmp/xray-install.XXXXXX.sh)
-    trap 'rm -f "${installer:-}"' RETURN
+    # 无论安装成功还是因错误退出，都只清理本函数创建的临时安装脚本。
+    trap "rm -f -- '$installer'" EXIT
 
     info "正在下载 Xray 官方安装脚本……"
     curl -fL --retry 3 --connect-timeout 15 "$XRAY_INSTALL_URL" -o "$installer"
@@ -314,7 +315,7 @@ install_xray() {
     info "正在安装 Xray，并将 systemd 服务用户设置为 root……"
     bash "$installer" "${XRAY_INSTALL_ARGS[@]}"
     rm -f "$installer"
-    trap - RETURN
+    trap - EXIT
 
     require_command xray
     success "Xray 安装完成：$(xray version | head -n 1)"
@@ -461,20 +462,41 @@ build_server_names_json() {
     REPLY=$output
 }
 
+is_local_ip_address() {
+    local address=$1 route_output=''
+
+    if [[ "$address" == *:* ]]; then
+        route_output=$(ip -6 route get "$address" 2>/dev/null || true)
+    else
+        route_output=$(ip -4 route get "$address" 2>/dev/null || true)
+    fi
+    [[ "$route_output" == local\ * ]]
+}
+
 check_reality_dest() {
     local dest="${DEST_HOST}:${DEST_PORT}"
     local check_ok=1
-    local resolved_ipv4=''
+    local resolved_addresses='' candidate
 
-    if command -v getent >/dev/null 2>&1; then
-        resolved_ipv4=$(getent ahostsv4 "$DEST_HOST" 2>/dev/null | awk '{print $1}' | sort -u || true)
-    fi
-    if ((DEST_PORT == REALITY_PORT)) &&
-       { [[ "$DEST_HOST" == '127.0.0.1' || "$DEST_HOST" == '::1' ]] ||
-         { [[ -n "$SERVER_PUBLIC_IPV4" ]] && grep -Fqx "$SERVER_PUBLIC_IPV4" <<<"$resolved_ipv4"; }; }; then
-        warn "Reality 目标网站 $dest 指向本机，端口又与 Reality 监听端口相同。"
-        warn "如果目标网站是同机 Caddy/Nginx，请填写它实际监听的另一个 HTTPS 端口。"
-        return 1
+    if ((DEST_PORT == REALITY_PORT)); then
+        require_command ip
+        if command -v getent >/dev/null 2>&1; then
+            resolved_addresses=$( {
+                getent ahostsv4 "$DEST_HOST" 2>/dev/null || true
+                getent ahostsv6 "$DEST_HOST" 2>/dev/null || true
+            } | awk '{print $1}' | sort -u)
+        fi
+        if [[ -z "$resolved_addresses" ]]; then
+            resolved_addresses=${DEST_HOST#[}
+            resolved_addresses=${resolved_addresses%]}
+        fi
+        for candidate in $resolved_addresses; do
+            if is_local_ip_address "$candidate"; then
+                warn "Reality 目标网站 $dest 指向本机，端口又与 Reality 监听端口相同。"
+                warn "如果目标网站是同机 Caddy/Nginx，请填写它实际监听的另一个 HTTPS 端口。"
+                return 1
+            fi
+        done
     fi
 
     info "正在测试 Reality 目标网站：${dest}（网站域名：${SERVER_NAME}）"
@@ -536,11 +558,8 @@ collect_configuration() {
     local detected_ip='' is_hong_kong=0 value
 
     detected_ip=$(curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)
-    if is_valid_ipv4 "$detected_ip"; then
-        SERVER_PUBLIC_IPV4=$detected_ip
-    else
+    if ! is_valid_ipv4 "$detected_ip"; then
         detected_ip=''
-        SERVER_PUBLIC_IPV4=''
     fi
 
     section_header 'Reality 入站配置'
@@ -816,6 +835,23 @@ write_config() {
     chmod 600 "$output_file"
 }
 
+prune_config_backups() {
+    local config_file=$1 index had_nullglob=0 IFS=$'\n'
+    local -a backups=()
+
+    shopt -q nullglob && had_nullglob=1
+    shopt -s nullglob
+    backups=("${config_file}.bak."*)
+    ((had_nullglob)) || shopt -u nullglob
+
+    ((${#backups[@]} > BACKUP_KEEP_COUNT)) || return 0
+    backups=($(printf '%s\n' "${backups[@]}" | sort -r))
+    for ((index = BACKUP_KEEP_COUNT; index < ${#backups[@]}; index++)); do
+        rm -f -- "${backups[index]}"
+    done
+    info "仅保留最近 ${BACKUP_KEEP_COUNT} 份配置备份。"
+}
+
 install_configuration() {
     local temp_dir temp_config backup_file='' timestamp test_output
     mkdir -p "$XRAY_CONFIG_DIR"
@@ -837,6 +873,7 @@ install_configuration() {
         backup_file="${XRAY_CONFIG_FILE}.bak.${timestamp}"
         cp -a "$XRAY_CONFIG_FILE" "$backup_file"
         info "旧配置已备份到：$backup_file"
+        prune_config_backups "$XRAY_CONFIG_FILE"
     fi
     mv -f "$temp_config" "$XRAY_CONFIG_FILE"
     rmdir "$temp_dir" 2>/dev/null || true
