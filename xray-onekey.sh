@@ -462,6 +462,16 @@ build_server_names_json() {
     REPLY=$output
 }
 
+format_host_port() {
+    local host=${1#[} port=$2
+    host=${host%]}
+    if [[ "$host" == *:* ]]; then
+        REPLY="[${host}]:${port}"
+    else
+        REPLY="${host}:${port}"
+    fi
+}
+
 is_local_ip_address() {
     local address=$1 route_output=''
 
@@ -474,9 +484,12 @@ is_local_ip_address() {
 }
 
 check_reality_dest() {
-    local dest="${DEST_HOST}:${DEST_PORT}"
+    local dest
     local check_ok=1
     local resolved_addresses='' candidate
+
+    format_host_port "$DEST_HOST" "$DEST_PORT"
+    dest=$REPLY
 
     if ((DEST_PORT == REALITY_PORT)); then
         require_command ip
@@ -756,9 +769,10 @@ write_proxy_outbound() {
 
 write_config() {
     local output_file=$1 index
-    local uuid dest_host server_names_json private_key short_id
+    local uuid target server_names_json private_key short_id
     json_escape "$CLIENT_UUID"; uuid=$REPLY
-    json_escape "$DEST_HOST"; dest_host=$REPLY
+    format_host_port "$DEST_HOST" "$DEST_PORT"
+    json_escape "$REPLY"; target=$REPLY
     build_server_names_json; server_names_json=$REPLY
     json_escape "$PRIVATE_KEY"; private_key=$REPLY
     json_escape "$SHORT_ID"; short_id=$REPLY
@@ -766,7 +780,7 @@ write_config() {
     {
         printf '%s' '{
   "routing": {
-    "domainStrategy": "IPIfNonMatch",
+    "domainStrategy": "AsIs",
     "rules": [
       {
         "type": "field",
@@ -802,7 +816,7 @@ write_config() {
         \"security\": \"reality\",
         \"realitySettings\": {
           \"show\": false,
-          \"target\": \"$dest_host:$DEST_PORT\",
+          \"target\": \"$target\",
           \"xver\": 0,
           \"serverNames\": [$server_names_json],
           \"privateKey\": \"$private_key\",
