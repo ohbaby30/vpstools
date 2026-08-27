@@ -414,58 +414,12 @@ generate_short_id() {
 }
 
 select_server_name() {
-    local input item existing duplicate
-    local -a candidates=()
-
     SERVER_NAMES=()
     if is_valid_domain "$DEST_HOST" && ! is_valid_ipv4 "$DEST_HOST"; then
         SERVER_NAME=$DEST_HOST
         SERVER_NAMES=("$DEST_HOST")
-        info "已自动加入目标网站域名：$DEST_HOST"
-        warn "追加的域名必须被目标网站的 HTTPS 证书覆盖。"
-
-        if ! ask_yes_no '是否还要增加其他可用域名？' n; then
-            return 0
-        fi
-
-        while true; do
-            printf '请输入要增加的域名（多个域名用英文逗号分隔）：'
-            IFS= read -r input || die "输入已中断。"
-            IFS=',' read -r -a candidates <<<"$input"
-            ((${#candidates[@]} > 0)) || {
-                warn "请至少输入一个域名。"
-                continue
-            }
-
-            duplicate=0
-            for item in "${candidates[@]}"; do
-                item=${item#"${item%%[![:space:]]*}"}
-                item=${item%"${item##*[![:space:]]}"}
-                item=${item%.}
-                if ! is_valid_domain "$item" || is_valid_ipv4 "$item"; then
-                    warn "域名格式不正确：${item:-空值}"
-                    duplicate=1
-                    break
-                fi
-            done
-            ((duplicate == 0)) || continue
-
-            for item in "${candidates[@]}"; do
-                item=${item#"${item%%[![:space:]]*}"}
-                item=${item%"${item##*[![:space:]]}"}
-                item=${item%.}
-                item=${item,,}
-                duplicate=0
-                for existing in "${SERVER_NAMES[@]}"; do
-                    if [[ "$existing" == "$item" ]]; then
-                        duplicate=1
-                        break
-                    fi
-                done
-                ((duplicate == 1)) || SERVER_NAMES+=("$item")
-            done
-            return 0
-        done
+        info "已使用目标网站域名：$DEST_HOST"
+        return 0
     fi
 
     info "前面填写的是 IP，请填写 Caddy/Nginx 网站证书对应的域名。"
