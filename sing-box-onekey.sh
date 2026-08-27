@@ -604,8 +604,9 @@ collect_configuration() {
     if ask_yes_no '这台 VPS 是否为香港服务器？' n; then
         is_hong_kong=1
         ENABLE_SITE_ROUTING=1
-        info "香港服务器将强制加入以下分流：OpenAI、X、Yahoo、Google DeepMind、Google Gemini、TikTok。"
-        add_routing_group 'hongkong' 'hkProxy' '香港服务器专用（OpenAI、X、Yahoo、Google DeepMind、Google Gemini、TikTok）'
+        warn "部分 AI 服务、Yahoo、TikTok 已在香港停止运营，可能无法访问。"
+        info "香港服务器将强制加入以下分流：AI、Yahoo、TikTok。"
+        add_routing_group 'hongkong' 'hkProxy' '香港服务器专用（AI、Yahoo、TikTok）'
     fi
 
     if ask_yes_no '是否需要流媒体分流（Netflix、Disney）？' n; then
@@ -621,6 +622,11 @@ collect_configuration() {
     if ((is_hong_kong == 0)) && ask_yes_no '是否需要 AI 分流（category-ai-!cn）？' n; then
         ENABLE_SITE_ROUTING=1
         add_routing_group 'ai' 'aiProxy' 'AI（category-ai-!cn）'
+    fi
+
+    if ask_yes_no '是否需要 Twitter 分流？' n; then
+        ENABLE_SITE_ROUTING=1
+        add_routing_group 'twitter' 'twitterProxy' 'Twitter'
     fi
 
     if ((ENABLE_SITE_ROUTING == 0)); then
@@ -655,7 +661,7 @@ write_routing_rules() {
         case "$key" in
             hongkong)
                 printf ',\n%s' "        {
-          \"rule_set\": [\"openai\", \"x\", \"yahoo\", \"google-deepmind\", \"google-gemini\", \"tiktok\"],
+          \"rule_set\": [\"category-ai-!cn\", \"yahoo\", \"tiktok\"],
           \"action\": \"route\",
           \"outbound\": \"$tag\"
         }"
@@ -677,6 +683,13 @@ write_routing_rules() {
             ai)
                 printf ',\n%s' "        {
           \"rule_set\": [\"category-ai-!cn\"],
+          \"action\": \"route\",
+          \"outbound\": \"$tag\"
+        }"
+                ;;
+            twitter)
+                printf ',\n%s' "        {
+          \"rule_set\": [\"twitter\"],
           \"action\": \"route\",
           \"outbound\": \"$tag\"
         }"
@@ -726,7 +739,7 @@ write_rule_set_declarations() {
         key=${ROUTING_KEYS[$index]}
         case "$key" in
             hongkong)
-                for name in openai x yahoo google-deepmind google-gemini tiktok; do
+                for name in category-ai-!cn yahoo tiktok; do
                     output+="${separator}    {
       \"type\": \"remote\",
       \"tag\": \"${name}\",
@@ -765,6 +778,16 @@ write_rule_set_declarations() {
       \"tag\": \"category-ai-!cn\",
       \"format\": \"binary\",
       \"url\": \"${base}/category-ai-!cn.srs\",
+      \"update_interval\": \"1d\"
+    }"
+                separator=','
+                ;;
+            twitter)
+                output+="${separator}    {
+      \"type\": \"remote\",
+      \"tag\": \"twitter\",
+      \"format\": \"binary\",
+      \"url\": \"${base}/twitter.srs\",
       \"update_interval\": \"1d\"
     }"
                 separator=','

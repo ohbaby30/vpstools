@@ -38,7 +38,7 @@ sudo ./vpstools.sh
 
 交互过程按 Reality 入站配置、Reality 目标网站设置、网站分流配置、回国流量设置、客户端链接生成和应用配置分区显示。其中客户端 ID、密钥、公钥与 shortId 均在 Reality 入站配置阶段生成。客户端 ID 可以自动生成 UUID，也可以手动填写有效 UUID，或填写长度为 1–30 位、仅包含英文字母和数字的自定义 ID。客户端连接地址和节点名称仅用于生成客户端导入链接，不会写入 Xray 服务端配置。
 
-非香港服务器选择 AI 分流时，规则使用 `geosite:category-ai-!cn`；香港服务器则保留脚本预设的香港专用分流规则。
+非香港服务器可选择 AI 分流（`geosite:category-ai-!cn`）和 Twitter 分流（`geosite:twitter`，最后询问）。香港服务器会强制加入 AI、Yahoo、TikTok 分流，并提示部分 AI 服务、Yahoo、TikTok 已在香港停止运营，可能无法访问。
 
 ### 选择正式版或 Beta 预发布版
 
@@ -187,7 +187,7 @@ sudo ./sing-box-onekey.sh --skip-install
 
 版本号自动从 GitHub Releases 获取，不写死。
 
-非香港服务器选择 AI 分流时，规则使用 MetaCubeX 的 `category-ai-!cn` rule-set；香港服务器则保留脚本预设的香港专用分流规则。
+非香港服务器可选择 MetaCubeX 的 `category-ai-!cn` AI rule-set 和 `twitter` rule-set（最后询问）。香港服务器会强制加入 AI、Yahoo、TikTok 分流，并提示部分 AI 服务、Yahoo、TikTok 已在香港停止运营，可能无法访问。
 
 使用同机 Caddy 或 Nginx 作为 REALITY 目标网站
 
