@@ -31,6 +31,8 @@ PUBLIC_KEY=''
 SHORT_ID=''
 ENABLE_SITE_ROUTING=0
 BLOCK_CN_IP=0
+SING_BOX_VERSION=''
+USE_HTTP_CLIENTS=0
 CLIENT_ADDRESS=''
 CLIENT_NAME=''
 VLESS_URL=''
@@ -289,6 +291,23 @@ get_latest_stable_version() {
         return 0
     fi
     die "无法获取 sing-box 最新正式版版本号(访问 github.com 失败)。请检查网络后重试。"
+}
+
+detect_singbox_features() {
+    local version='' major minor patch
+
+    version=$(sing-box version 2>&1 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "无法识别当前 sing-box 版本，无法判断配置兼容性。"
+    SING_BOX_VERSION=$version
+
+    IFS='.' read -r major minor patch <<<"$SING_BOX_VERSION"
+    if ((10#$major > 1 || (10#$major == 1 && 10#$minor >= 14))); then
+        USE_HTTP_CLIENTS=1
+        info "检测到 sing-box v${SING_BOX_VERSION}，远程规则集将使用 1.14+ HTTP Client 配置。"
+    else
+        USE_HTTP_CLIENTS=0
+        info "检测到 sing-box v${SING_BOX_VERSION}，保留 1.13 兼容的规则集下载配置。"
+    fi
 }
 
 install_singbox() {
@@ -767,6 +786,22 @@ write_rule_set_declarations() {
     REPLY=$output
 }
 
+write_http_clients_config() {
+    ((USE_HTTP_CLIENTS == 1)) || return 0
+    printf '%s' ',
+  "http_clients": [
+    {
+      "tag": "rule-set-download"
+    }
+  ]'
+}
+
+write_default_http_client() {
+    ((USE_HTTP_CLIENTS == 1)) || return 0
+    printf '%s' '    "default_http_client": "rule-set-download",
+'
+}
+
 write_proxy_outbound() {
     local index=$1 tag address port password
     tag=${ROUTING_TAGS[$index]}
@@ -858,8 +893,10 @@ write_config() {
         fi
         printf '%s' '
   ]'
+        write_http_clients_config
         printf '%s' ',
   "route": {'
+        write_default_http_client
         printf '%s' '
     "rules": [
       {
@@ -1006,6 +1043,7 @@ main() {
         require_command sing-box
         info "已跳过安装，使用现有版本：$(sing-box version | head -n 1)"
     fi
+    detect_singbox_features
     require_command curl
 
     while true; do
