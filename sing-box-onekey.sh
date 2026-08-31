@@ -791,8 +791,7 @@ write_http_clients_config() {
     printf '%s' ',
   "http_clients": [
     {
-      "tag": "rule-set-download",
-      "detour": "direct"
+      "tag": "rule-set-download"
     }
   ]'
 }
