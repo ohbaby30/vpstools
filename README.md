@@ -98,7 +98,7 @@ sudo ./xray-onekey.sh --skip-install
 
 sing-box 脚本与 Xray 版的交互流程相同：生成 VLESS + REALITY 配置、按网站类别选择分流、可选 `geoip:cn` 屏蔽，并输出可导入的 `vless://` 链接。
 
-当前脚本只安装 GitHub Releases 的**最新正式稳定版** sing-box，**没有 Beta/测试版选择**。脚本使用 MetaCubeX remote rule-set；首次启动会下载规则集，随后由 sing-box 缓存并更新。
+当前脚本只安装 GitHub Releases 的**最新正式稳定版** sing-box，**没有 Beta/测试版选择**。脚本使用 MetaCubeX remote rule-set；首次启动会下载规则集，随后由 sing-box 缓存并更新。检测到 sing-box `1.14+` 时，脚本会自动生成 `http_clients` 与 `route.default_http_client`；使用 `--skip-install` 且本机仍是 `1.13` 时，会自动保留旧格式，避免写入 1.13 不支持的字段。
 
 客户端 ID 可自动生成 UUID，或手动填写有效 UUID。客户端连接地址和节点名称只用于生成客户端导入链接，不写入 sing-box 服务端配置。
 
