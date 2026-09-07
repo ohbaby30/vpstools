@@ -3,6 +3,7 @@
 个人使用的 VPS 交互式工具脚本：
 
 - `vpstools.sh`：VPS 常用工具菜单
+- `install_passwall2.sh`：ImmortalWrt PassWall2 APK 一键升级
 - `xray-onekey.sh`：Xray VLESS + REALITY 一键部署
 - `sing-box-onekey.sh`：sing-box VLESS + REALITY 一键部署
 
@@ -12,6 +13,7 @@
 
 - [运行环境](#运行环境)
 - [VPS 常用工具箱](#vps-常用工具箱)
+- [ImmortalWrt PassWall2 升级](#immortalwrt-passwall2-升级)
 - [Xray 一键部署](#xray-一键部署)
 - [sing-box 一键部署](#sing-box-一键部署)
 - [Reality 目标网站怎么填写](#reality-目标网站怎么填写)
@@ -52,6 +54,30 @@ curl -fL https://raw.githubusercontent.com/ohbaby30/vpstools/main/vpstools.sh -o
 chmod +x vpstools.sh
 sudo ./vpstools.sh
 ```
+
+## ImmortalWrt PassWall2 升级
+
+`install_passwall2.sh` 会自动识别 `x86_64` 与 R4S（`aarch64`）机型，从 [ohbaby30/immortalwrt-Build](https://github.com/ohbaby30/immortalwrt-Build) 的 Releases 选择匹配机型的最新版本，下载对应的 PassWall2 APK 后安装。这里的 APK 是 ImmortalWrt/OpenWrt 的软件包，不是 Android APK；脚本会使用 `apk add --allow-untrusted` 安装这些第三方构建的包。
+
+**只建议在使用 `ohbaby30/immortalwrt-Build` 固件时运行。**其他来源固件的内核、依赖和软件源可能不同，脚本不保证没有兼容性问题。检测到非 R4S 的 `aarch64` 设备时，脚本会警告并暂按 R4S 包处理，应自行确认后再继续。
+
+### 直接运行
+
+在 ImmortalWrt 的 SSH 中以 root 执行：
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/install_passwall2.sh)"
+```
+
+也可以通过 `vpstools.sh` 的“ImmortalWrt 相关 → 一键升级 PassWall2”运行。
+
+### 升级后的重置与节点备份
+
+更新 APK 后，建议在 LuCI 按以下路径执行一次重置，才能尽量使用新版本功能：`PassWall2 → 基本设置 → 维护 → 执行重置`。
+
+**重置会清空 PassWall2 的全部设置和节点。**如需尝试恢复节点，请在重置前通过 ImmortalWrt SSH 打开 `/etc/config/passwall2`，复制保存所有以 `config nodes` 开头的节点区块；重置后将这些区块追加回该文件最下方，再保存。
+
+该恢复方法不保证 100% 成功，配置格式或依赖发生变化时节点仍可能无法恢复，请谨慎使用并自行保留完整配置备份。
 
 ## Xray 一键部署
 

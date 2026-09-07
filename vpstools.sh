@@ -9,12 +9,14 @@ readonly XRAY_INSTALL_URL="https://github.com/XTLS/Xray-install/raw/main/install
 readonly XRAY_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh"
 readonly SING_BOX_INSTALL_URL="https://sing-box.app/install.sh"
 readonly SING_BOX_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh"
+readonly PASSWALL2_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/install_passwall2.sh"
 readonly RESET='\033[0m'
 readonly BOLD='\033[1m'
 readonly META_COLOR='\033[1;33m'
 readonly SERVER_COLOR='\033[1;36m'
 readonly XRAY_COLOR='\033[1;31m'
 readonly SING_BOX_COLOR='\033[1;32m'
+readonly IMMORTALWRT_COLOR='\033[1;35m'
 
 info() {
     printf '\033[1;34m[信息]\033[0m %s\n' "$*"
@@ -213,6 +215,20 @@ run_sing_box_onekey() {
     bash <(curl -4 -fsSL "$SING_BOX_ONEKEY_URL")
 }
 
+run_passwall2_upgrade() {
+    clear
+    printf '========== 一键升级 PassWall2 ==========\n\n'
+    require_root || return 1
+    require_command curl || return 1
+    info "脚本来源：$PASSWALL2_ONEKEY_URL"
+    warn "仅适用于 ohbaby30/immortalwrt-Build 固件；脚本会按机型下载 APK 并使用 --allow-untrusted 安装。"
+    confirm_system_change "将下载并执行 PassWall2 APK 升级脚本。其他来源固件不保证兼容性。" || {
+        info "已取消。"
+        return 0
+    }
+    sh <(curl -fsSL "$PASSWALL2_ONEKEY_URL")
+}
+
 set_shanghai_timezone() {
     clear
     printf '========== Debian 校准时间 ==========\n\n'
@@ -259,6 +275,8 @@ show_menu() {
     printf '%b 11. sing-box 生成密钥%b\n' "$SING_BOX_COLOR" "$RESET"
     printf '%b 12. 开机自启并启动 sing-box%b\n' "$SING_BOX_COLOR" "$RESET"
     printf '%b 13. sing-box Reality 一键安装%b\n\n' "$SING_BOX_COLOR" "$RESET"
+    printf '%b【ImmortalWrt 相关】%b\n' "$IMMORTALWRT_COLOR" "$RESET"
+    printf '%b 14. 一键升级 PassWall2%b\n\n' "$IMMORTALWRT_COLOR" "$RESET"
     printf '  0. 退出\n'
     printf '======================================\n'
 }
@@ -322,6 +340,10 @@ main() {
                 ;;
             13)
                 run_sing_box_onekey
+                pause
+                ;;
+            14)
+                run_passwall2_upgrade
                 pause
                 ;;
             0)
