@@ -1,8 +1,8 @@
 #!/bin/sh
 #
 # install_passwall2.sh
-# 在 immortalwrt (apk 包管理器版本) 本机运行,自动判断 x86_64 / R4S,
-# 从 ohbaby30/immortalwrt-Build 的 Releases 下载对应架构的 passwall2 apk 包并本地安装。
+# 在 immortalwrt (apk 包管理器版本) 本机运行,支持 x86_64 / R4S,
+# 从 ohbaby30/immortalwrt-Build 的固定更新清单下载通用 PassWall2 APK 并本地安装。
 #
 # 仓库: https://github.com/ohbaby30/immortalwrt-Build/releases
 #
@@ -18,8 +18,7 @@
 set -e
 
 REPO="ohbaby30/immortalwrt-Build"
-API_BASE="https://api.github.com/repos/${REPO}"
-WORK_DIR="/tmp/passwall2_install"
+UPDATE_URL="https://raw.githubusercontent.com/${REPO}/passwall2-update/passwall2-release-api.json"
 
 log() {
     echo "[passwall2] $*"
@@ -34,16 +33,14 @@ detect_platform() {
     case "$ARCH" in
         x86_64)
             PLATFORM="x86_64"
-            TAG_KEYWORD="x86_64"
             ;;
         aarch64|armv8*)
             PLATFORM="r4s"
-            TAG_KEYWORD="r4s"
             case "$MODEL" in
                 *R4S*|*r4s*|*NanoPi*|*Rockchip*|*rk3399*) : ;;
                 *)
                     log "警告: 检测到 aarch64 架构,但设备型号(${MODEL:-未知})看起来不像 R4S,"
-                    log "该仓库目前只发布 x86_64 和 r4s 两种固件对应的包,继续按 r4s 处理,如不对请手动中断 (Ctrl+C)。"
+                    log "本脚本仅保证该仓库的 x86_64 / R4S 固件兼容性,如不对请手动中断 (Ctrl+C)。"
                     ;;
             esac
             ;;
@@ -58,6 +55,14 @@ detect_platform() {
 
 # ---------- 检查/安装依赖 ----------
 ensure_tools() {
+    command -v apk >/dev/null 2>&1 || {
+        echo "本脚本仅支持使用 apk 包管理器的 ImmortalWrt。"
+        exit 1
+    }
+    command -v sha256sum >/dev/null 2>&1 || {
+        echo "缺少 sha256sum,无法校验下载文件。"
+        exit 1
+    }
     if ! command -v curl >/dev/null 2>&1; then
         log "未检测到 curl,尝试通过 apk 安装..."
         apk update >/dev/null 2>&1 || true
@@ -76,38 +81,38 @@ ensure_tools() {
     fi
 }
 
-# ---------- 找到对应架构最新的 release ----------
+# ---------- 读取已发布的通用 APK 更新清单 ----------
 pick_release() {
-    log "正在获取 release 列表..."
-    RELEASES_JSON="$(curl -fsSL "${API_BASE}/releases")"
-    if [ -z "$RELEASES_JSON" ]; then
-        echo "获取 release 列表失败,请检查路由器能否访问 github.com / api.github.com。"
+    log "正在获取 PassWall2 更新清单..."
+    if ! RELEASE_JSON="$(curl -fsSL "$UPDATE_URL")"; then
+        echo "获取更新清单失败,请检查路由器能否访问 raw.githubusercontent.com。"
         exit 1
     fi
-
-    TAG_NAME="$(echo "$RELEASES_JSON" | jq -r --arg kw "$TAG_KEYWORD" \
-        '[.[] | select(.tag_name | contains($kw))] | sort_by(.published_at) | last | .tag_name // empty')"
-
-    if [ -z "$TAG_NAME" ]; then
-        echo "未找到匹配 \"${TAG_KEYWORD}\" 的 release,可能仓库命名规则变了,请手动去页面确认:"
-        echo "  https://github.com/${REPO}/releases"
+    if ! printf '%s\n' "$RELEASE_JSON" | jq -e --arg repo "$REPO" '
+        (.tag_name | type == "string" and length > 0) and
+        (.html_url == ("https://github.com/" + $repo + "/releases/tag/passwall2-" + .tag_name)) and
+        (.assets | type == "array")' >/dev/null 2>&1; then
+        echo "更新清单格式无效或 Release 来源不匹配,已停止。"
         exit 1
     fi
-    log "使用 release: ${TAG_NAME}"
-
-    RELEASE_JSON="$(echo "$RELEASES_JSON" | jq -c --arg tag "$TAG_NAME" '.[] | select(.tag_name == $tag)')"
+    TAG_NAME="$(printf '%s\n' "$RELEASE_JSON" | jq -r '.tag_name')"
+    log "使用 PassWall2 版本: ${TAG_NAME}"
 }
 
-# ---------- 从该 release 里筛出 passwall2 相关的 .apk ----------
+# ---------- 仅选取通用主程序和简体中文包,验证来源与摘要 ----------
 pick_assets() {
-    ASSET_LIST="$(echo "$RELEASE_JSON" | jq -r '.assets[] | "\(.name)\t\(.browser_download_url)"')"
-
-    PW_ASSETS="$(echo "$ASSET_LIST" | grep -i '\.apk$' | grep -Ei 'passwall2|passwall_packages|v2ray-geo|geoview|xray' || true)"
-
-    if [ -z "$PW_ASSETS" ]; then
-        echo "在 release ${TAG_NAME} 中没有找到 passwall2 相关的 .apk 文件。"
-        echo "该 release 全部资产如下,请手动确认命名规则,再调整脚本里的过滤关键字:"
-        echo "$ASSET_LIST"
+    if ! PW_ASSETS="$(printf '%s\n' "$RELEASE_JSON" | jq -er --arg repo "$REPO" '
+        .tag_name as $tag |
+        [.assets[] | select(.name | test("^luci-(app-passwall2|i18n-passwall2-zh-cn)-[A-Za-z0-9._-]+\\.apk$"))] |
+        if length == 2 and
+           ([.[] | select(.name | startswith("luci-app-passwall2-"))] | length == 1) and
+           ([.[] | select(.name | startswith("luci-i18n-passwall2-zh-cn-"))] | length == 1) and
+           all(.[];
+               .browser_download_url == ("https://github.com/" + $repo + "/releases/download/passwall2-" + $tag + "/" + .name) and
+               (.digest | test("^sha256:[0-9a-f]{64}$")))
+        then .[] | [.name, .browser_download_url, (.digest | sub("^sha256:"; ""))] | @tsv
+        else error("invalid APK assets") end')"; then
+        echo "更新清单必须包含唯一的 PassWall2 主程序和中文 APK,且下载地址和 SHA-256 摘要有效,已停止。"
         exit 1
     fi
 
@@ -129,20 +134,26 @@ confirm() {
 
 # ---------- 下载并安装 ----------
 download_and_install() {
-    mkdir -p "$WORK_DIR"
-    rm -f "$WORK_DIR"/*.apk 2>/dev/null || true
+    WORK_DIR="$(mktemp -d /tmp/passwall2_install.XXXXXX)"
+    trap 'rm -f "$WORK_DIR"/*.apk; rmdir "$WORK_DIR"' EXIT
+    trap 'exit 1' HUP INT TERM
 
-    echo "$PW_ASSETS" | while IFS="$(printf '\t')" read -r name url; do
+    while IFS="$(printf '\t')" read -r name url digest; do
         log "下载 ${name} ..."
         curl -fsSL -o "${WORK_DIR}/${name}" "$url"
-    done
+        if ! printf '%s  %s\n' "$digest" "${WORK_DIR}/${name}" | sha256sum -c -; then
+            echo "${name} SHA-256 校验失败,未执行安装。"
+            exit 1
+        fi
+    done <<EOF
+$PW_ASSETS
+EOF
 
     log "开始安装 (apk add --allow-untrusted) ..."
-    for f in "$WORK_DIR"/*.apk; do
-        [ -e "$f" ] || continue
-        log "安装 $(basename "$f") ..."
-        apk add --allow-untrusted "$f" || log "警告: $(basename "$f") 安装失败,可能需要手动处理依赖或先安装缺失的依赖包。"
-    done
+    if ! apk add --allow-untrusted "$WORK_DIR"/*.apk; then
+        echo "PassWall2 安装失败,请检查上方 apk 错误与依赖状态。"
+        exit 1
+    fi
 
     log "安装流程结束。请到 LuCI -> 服务 (Services) 菜单确认 Passwall2 是否已出现,并重启一次服务。"
 }

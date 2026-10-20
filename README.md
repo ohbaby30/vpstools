@@ -57,7 +57,7 @@ sudo ./vpstools.sh
 
 ## ImmortalWrt PassWall2 升级
 
-`install_passwall2.sh` 会从 [ohbaby30/immortalwrt-Build](https://github.com/ohbaby30/immortalwrt-Build) 的 Releases 自动按机型选择最新版本，下载并安装对应的 PassWall2 APK。安装包由该仓库的 ImmortalWrt 固件构建流程生成，脚本使用 `apk add --allow-untrusted` 完成安装。
+`install_passwall2.sh` 会读取 [ohbaby30/immortalwrt-Build 的固定更新清单](https://raw.githubusercontent.com/ohbaby30/immortalwrt-Build/passwall2-update/passwall2-release-api.json)，从独立的 `passwall2-*` Release 下载通用主程序和简体中文 APK，不再按机型查找固件 Release。脚本核对下载地址和 SHA-256 摘要，两包下载校验通过后使用一次 `apk add --allow-untrusted` 安装；下载、校验或安装失败时返回非零状态。每次使用独立临时目录，退出时清理本次下载。
 
 **仅保证在从 `ohbaby30/immortalwrt-Build` 下载并升级的 ImmortalWrt 固件上有效。**其他来源的 ImmortalWrt 或 OpenWrt 固件不保证兼容。
 

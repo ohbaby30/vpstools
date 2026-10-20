@@ -221,7 +221,7 @@ run_passwall2_upgrade() {
     require_root || return 1
     require_command curl || return 1
     info "脚本来源：$PASSWALL2_ONEKEY_URL"
-    warn "仅适用于 ohbaby30/immortalwrt-Build 固件；脚本会按机型下载 APK 并使用 --allow-untrusted 安装。"
+    warn "仅适用于 ohbaby30/immortalwrt-Build 固件；脚本会按固定更新清单下载通用 APK，校验 SHA-256 后使用 --allow-untrusted 安装。"
     confirm_system_change "将下载并执行 PassWall2 APK 升级脚本。其他来源固件不保证兼容性。" || {
         info "已取消。"
         return 0
