@@ -9,7 +9,8 @@ readonly XRAY_INSTALL_URL="https://github.com/XTLS/Xray-install/raw/main/install
 readonly XRAY_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh"
 readonly SING_BOX_INSTALL_URL="https://sing-box.app/install.sh"
 readonly SING_BOX_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh"
-readonly PASSWALL2_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/main/install_passwall2.sh"
+readonly PASSWALL2_ONEKEY_VERSION="8bc4b03f0685ba58abd397d799aac95bdcecbbe9"
+readonly PASSWALL2_ONEKEY_URL="https://raw.githubusercontent.com/ohbaby30/vpstools/${PASSWALL2_ONEKEY_VERSION}/install_passwall2.sh"
 readonly RESET='\033[0m'
 readonly BOLD='\033[1m'
 readonly META_COLOR='\033[1;33m'
@@ -221,6 +222,7 @@ run_passwall2_upgrade() {
     require_root || return 1
     require_command curl || return 1
     info "脚本来源：$PASSWALL2_ONEKEY_URL"
+    info "PassWall2 升级器版本：$PASSWALL2_ONEKEY_VERSION"
     warn "仅适用于 ohbaby30/immortalwrt-Build 固件；脚本会按固定更新清单下载通用 APK，校验 SHA-256 后使用 --allow-untrusted 安装。"
     confirm_system_change "将下载并执行 PassWall2 APK 升级脚本。其他来源固件不保证兼容性。" || {
         info "已取消。"
