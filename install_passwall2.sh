@@ -102,15 +102,27 @@ pick_release() {
 # ---------- 仅选取通用主程序和简体中文包,验证来源与摘要 ----------
 pick_assets() {
     if ! PW_ASSETS="$(printf '%s\n' "$RELEASE_JSON" | jq -er --arg repo "$REPO" '
+        # OpenWrt 的 jq 可能未编译正则库,仅使用基础字符串和字符码操作。
+        def safe_name:
+            type == "string" and
+            (explode | all(.[];
+                (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or
+                (. >= 97 and . <= 122) or . == 45 or . == 46 or . == 95));
+        def sha256_digest:
+            type == "string" and startswith("sha256:") and length == 71 and
+            (.[7:] | explode | all(.[];
+                (. >= 48 and . <= 57) or (. >= 97 and . <= 102)));
         .tag_name as $tag |
-        [.assets[] | select(.name | test("^luci-(app-passwall2|i18n-passwall2-zh-cn)-[A-Za-z0-9._-]+\\.apk$"))] |
+        [.assets[] | select(.name | safe_name and endswith(".apk") and
+            ((startswith("luci-app-passwall2-") and length > 23) or
+             (startswith("luci-i18n-passwall2-zh-cn-") and length > 30)))] |
         if length == 2 and
            ([.[] | select(.name | startswith("luci-app-passwall2-"))] | length == 1) and
            ([.[] | select(.name | startswith("luci-i18n-passwall2-zh-cn-"))] | length == 1) and
            all(.[];
                .browser_download_url == ("https://github.com/" + $repo + "/releases/download/passwall2-" + $tag + "/" + .name) and
-               (.digest | test("^sha256:[0-9a-f]{64}$")))
-        then .[] | [.name, .browser_download_url, (.digest | sub("^sha256:"; ""))] | @tsv
+               (.digest | sha256_digest))
+        then .[] | [.name, .browser_download_url, .digest[7:]] | @tsv
         else error("invalid APK assets") end')"; then
         echo "更新清单必须包含唯一的 PassWall2 主程序和中文 APK,且下载地址和 SHA-256 摘要有效,已停止。"
         exit 1
