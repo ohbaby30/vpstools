@@ -125,16 +125,62 @@ verify_bbr() {
 }
 
 install_xray() {
+    local installer config='/usr/local/etc/xray/config.json'
+    local service_user service_group
     clear
     printf '========== 安装 Xray 稳定版 ==========\n\n'
     require_root || return 1
     require_command curl || return 1
     info "安装脚本来源：$XRAY_INSTALL_URL"
-    confirm_system_change "将从 GitHub 下载并以 root 身份执行 Xray 官方安装脚本。" || {
+    confirm_system_change "将执行 Xray 官方安装脚本、适配配置文件读取权限并重启服务。" || {
         info "已取消。"
         return 0
     }
-    bash -c "$(curl -fsSL "$XRAY_INSTALL_URL")" @ install -u root
+    installer=$(curl -fsSL "$XRAY_INSTALL_URL") || return 1
+    [[ -n "$installer" ]] || { error "下载的 Xray 安装脚本为空。"; return 1; }
+
+    # 官方安装阶段会重启已有服务；提前让新 xray 身份可读取旧配置。
+    if [[ -f "$config" ]]; then
+        service_user=$(systemctl show xray -p User --value) || return 1
+        service_user=${service_user:-root}
+        if [[ "$service_user" != 'root' && "$service_user" != 'xray' ]]; then
+            error "现有服务用户为 $service_user，请先单独适配权限，配置未修改。"
+            return 1
+        fi
+        if [[ "$(stat -c %u "$config")" != '0' ]]; then
+            error "现有配置不归 root 所有，请先核对，配置未修改。"
+            return 1
+        fi
+        if ! getent group xray >/dev/null; then
+            groupadd --system xray || return 1
+        fi
+        chgrp xray "$config" && chmod 640 "$config" || return 1
+    fi
+
+    if ! bash -c "$installer" @ install; then
+        error "官方安装未完成，请查看安装输出及 journalctl -u xray -n 40 --no-pager -l。"
+        return 1
+    fi
+
+    service_user=$(systemctl show xray -p User --value) || return 1
+    service_user=${service_user:-root}
+    service_group=$(systemctl show xray -p Group --value) || return 1
+    if [[ -z "$service_group" ]]; then
+        service_group=$(id -gn "$service_user") || return 1
+    fi
+    if [[ "$(id -u "$service_user")" == '0' ]]; then
+        chown root:root "$config" && chmod 600 "$config" || return 1
+        xray run -test -config "$config" || return 1
+    else
+        chown "root:$service_group" "$config" && chmod 640 "$config" || return 1
+        if ! runuser -u "$service_user" -g "$service_group" -- \
+            "$(command -v xray)" run -test -config "$config"; then
+            error "服务用户配置检查失败，请核对配置及上级目录的访问权限。"
+            return 1
+        fi
+    fi
+    systemctl restart xray && systemctl is-active --quiet xray || return 1
+    info "Xray 安装及配置权限检查完成，服务已启动。"
 }
 
 generate_xray_key() {
