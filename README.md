@@ -11,7 +11,7 @@
 | `vpstools.sh`          | 工具箱主菜单：基础工具安装、时区校准、流媒体解锁检测、BBR 开启与验证，并可调用下列脚本                     |
 | `xray-onekey.sh`       | 交互式部署 Xray（VLESS + REALITY），支持按场景配置路由分流                           |
 | `sing-box-onekey.sh`   | 交互式部署 sing-box（VLESS + REALITY），交互流程与 Xray 版一致                    |
-| `install_passwall2.sh` | 在 ImmortalWrt 上升级 PassWall2（仅适用于 `ohbaby30/immortalwrt-Build` 固件） |
+| `install_passwall2.sh` | 在 ImmortalWrt 上升级 PassWall2（仅适用于 [`ohbaby30/immortalwrt-Build`](https://github.com/ohbaby30/immortalwrt-Build) 固件） |
 
 Xray / sing-box 脚本的通用特性：
 
