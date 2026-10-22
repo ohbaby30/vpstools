@@ -1,267 +1,122 @@
 # VPS Tools
 
-个人使用的 VPS 交互式工具脚本：
+个人自用的 VPS 交互式工具脚本集：一条命令打开菜单，装常用工具、开 BBR、一键部署 Xray / sing-box（VLESS + REALITY）。
 
-- `vpstools.sh`：VPS 常用工具菜单
-- `install_passwall2.sh`：ImmortalWrt PassWall2 APK 一键升级
-- `xray-onekey.sh`：Xray VLESS + REALITY 一键部署
-- `sing-box-onekey.sh`：sing-box VLESS + REALITY 一键部署
+> 脚本会安装软件、修改配置并重启服务。请先在测试环境确认，并自行保留配置备份。
 
-> 脚本会安装软件、修改配置并重启服务。请先阅读本说明，并在测试环境确认后再用于正式服务器。
+## 能做什么
 
-## 目录
+| 脚本 | 作用 |
+| --- | --- |
+| `vpstools.sh` | 主菜单：安装常用工具、校准时区、流媒体测试、开启/验证 BBR，并可调用下面几个脚本 |
+| `xray-onekey.sh` | 交互式部署 Xray：VLESS + REALITY，支持按场景分流 |
+| `sing-box-onekey.sh` | 交互式部署 sing-box：VLESS + REALITY，交互流程与 Xray 版相近 |
+| `install_passwall2.sh` | ImmortalWrt 上一键升级 PassWall2，仅保证适配 `ohbaby30/immortalwrt-Build` 的 x86_64 / R4S 固件 |
 
-- [运行环境](#运行环境)
-- [VPS 常用工具箱](#vps-常用工具箱)
-- [ImmortalWrt PassWall2 升级](#immortalwrt-passwall2-升级)
-- [Xray 一键部署](#xray-一键部署)
-- [sing-box 一键部署](#sing-box-一键部署)
-- [Reality 目标网站怎么填写](#reality-目标网站怎么填写)
-- [配置备份与回滚](#配置备份与回滚)
-- [卸载](#卸载)
-- [常见问题](#常见问题)
+Xray / sing-box 脚本的共同能力：
 
-## 运行环境
+- 自动生成 REALITY 配置和 `vless://` 导入链接。
+- 按场景选择分流（香港服务器、流媒体、PayPal、AI、Twitter），每组可选 Trojan 或 Shadowsocks 出站。
+- 可选屏蔽回国流量：Xray 使用 `geoip:cn`，sing-box 使用远程 rule-set。
+- 配置先检查再生效；替换前备份旧配置，重启失败时尝试恢复备份并重新启动。
 
-- Linux 系统，且使用 systemd。
-- 以 root 运行；非 root 用户使用 `sudo`。
-- VPS 需要能访问 GitHub 和 GitHub Raw；下载失败时，先检查网络、代理与 DNS。
-- sing-box 支持 `amd64`、`arm64`、`armv7`、`386` 架构。
-- 脚本会使用系统自带的 `ip`、`curl`、`systemctl` 等命令；常见 Debian/Ubuntu VPS 默认具备这些组件。
+## 怎么用
 
-`vpstools.sh` 中的 BBR 项目面向 Debian 13；时区校准会设置为 `Asia/Shanghai`。它们不是 Xray 或 sing-box 部署的前置条件。
+**VPS 环境：** Linux + systemd，以 root 运行（非 root 在命令前加 `sudo`），能访问 GitHub 和 GitHub Raw，并具备 `curl`、`ip` 等基础工具。sing-box 支持 `amd64`、`arm64`、`armv7`、`386`。ImmortalWrt 脚本单独使用 `sh` 和 APK 包管理器，不要求 systemd。
 
-## VPS 常用工具箱
-
-### Bash + curl 直接运行
-
-以 root 用户运行：
+**打开工具箱菜单：**
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/vpstools.sh)"
 ```
 
-非 root 用户：
+**也可以单独运行某个脚本：**
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/vpstools.sh)"
-```
+# Xray 首次安装：可选稳定版或 Beta
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh)"
 
-### 下载后运行
+# sing-box 首次安装：最新正式稳定版
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)"
 
-```bash
-curl -fL https://raw.githubusercontent.com/ohbaby30/vpstools/main/vpstools.sh -o vpstools.sh
-chmod +x vpstools.sh
-sudo ./vpstools.sh
-```
+# 已安装，只重新生成并应用配置（会重启服务，并非仅升级内核）
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh)" -- --skip-install
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)" -- --skip-install
 
-## ImmortalWrt PassWall2 升级
-
-`install_passwall2.sh` 会读取 [ohbaby30/immortalwrt-Build 的固定更新清单](https://raw.githubusercontent.com/ohbaby30/immortalwrt-Build/passwall2-update/passwall2-release-api.json)，从独立的 `passwall2-*` Release 下载通用主程序和简体中文 APK，不再按机型查找固件 Release。脚本核对下载地址和 SHA-256 摘要，两包下载校验通过后使用一次 `apk add --allow-untrusted` 安装；下载、校验或安装失败时返回非零状态。每次使用独立临时目录，退出时清理本次下载。
-
-**仅保证在从 `ohbaby30/immortalwrt-Build` 下载并升级的 ImmortalWrt 固件上有效。**其他来源的 ImmortalWrt 或 OpenWrt 固件不保证兼容。
-
-### 直接运行
-
-在 ImmortalWrt 的 SSH 中以 root 执行：
-
-```sh
+# ImmortalWrt：SSH 里以 root 执行
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/install_passwall2.sh)"
 ```
 
-也可以通过 `vpstools.sh` 的“ImmortalWrt 相关 → 一键升级 PassWall2”运行。
+**REALITY 目标网站怎么填：** 如果同机已有 Caddy / Nginx，可以作为目标。例如 REALITY 监听 `443`，Caddy HTTPS 监听 `12345`，那么目标地址填 `127.0.0.1`、端口填 `12345`、域名填 Caddy 证书对应的域名。客户端连接地址则填 VPS 的公网 IP 或指向它的域名。目标不能回连到 REALITY 自己的监听端口。
 
-### 升级后的重置与节点备份
+## 安装与权限说明
 
-更新 APK 后，建议在 LuCI 按以下路径执行一次重置，才能尽量使用新版本功能：`PassWall2 → 基本设置 → 维护 → 执行重置`。
+- **Xray：** 调用官方安装脚本，已有安装暂缓重启，等新配置及权限检查通过后统一重启。全新安装时，官方脚本可能先启动默认空配置。
+- **Xray 配置权限：** 当前默认 xray 服务使用 `640 root:xray`；`--skip-install` 沿用现有运行用户，旧 root 服务使用 `600 root:root`，其他用户使用 `640 root:<服务组>`。配置会按实际服务身份检查读取权限。
+- **中途退出：** Xray 安装阶段开始后若取消或失败，脚本会检查现有配置并尝试补做重启；检查失败则提示手动处理，不能视为升级完成。强制结束进程或断电无法触发退出处理。
+- **sing-box：** 使用 MetaCubeX 远程规则集，首次使用时需要联网下载，后续缓存和更新；生成配置兼容 1.13 与 1.14+ 的规则集下载格式。
+- **PassWall2：** 从固定更新清单下载主程序和中文 APK，校验 SHA-256 后安装。其他固件不保证兼容。
 
-**重置会清空 PassWall2 的全部设置和节点。**
+## 技术栈
 
-如需尝试恢复节点，请按以下步骤操作：
+- **Shell：** VPS 脚本使用 Bash，PassWall2 升级脚本使用 POSIX sh，并调用系统命令。
+- **代理核心：** [Xray-core](https://github.com/XTLS/Xray-core)、[sing-box](https://github.com/SagerNet/sing-box)。
+- **协议：** VLESS + REALITY。
+- **系统：** 常见 Debian / Ubuntu + systemd；BBR 开启项面向 Debian 13，时区校准设置为 `Asia/Shanghai`。
+- **ImmortalWrt：** APK 包管理，PassWall2。
 
-1. 在重置前通过 SSH 登录 ImmortalWrt。
-2. 打开 `/etc/config/passwall2`。
-3. 复制所有以 `config nodes` 开头的节点区块。
-4. 将这些节点区块保存到其他位置。
-5. 完成重置。
-6. 将这些节点区块追加到 `/etc/config/passwall2` 的末尾。
-7. 保存文件。
+## 备份、回滚与卸载
 
-### ⚠️ 免责声明
-
-**该恢复方法不保证 100% 成功，配置格式或依赖发生变化时节点仍可能无法恢复。请谨慎使用并自行保留完整配置备份。**
-
-## Xray 一键部署
-
-脚本会交互生成 VLESS + REALITY 配置，安装时可选择 Xray 正式稳定版或 Beta 预发布版，按香港服务器、流媒体、PayPal、AI、Twitter 场景选择分流，并可选择是否通过 `geoip:cn` 屏蔽回国流量。每组分流均可独立选择 Trojan 或 Shadowsocks 出站。服务端路由使用 `AsIs`：域名按域名规则匹配，直接传入的 IP 仍可匹配 IP 规则，但不会为域名额外解析 IP。
-
-客户端 ID 可以自动生成 UUID，也可以手动填写有效 UUID，或填写长度为 1–30 位、仅包含英文字母和数字的自定义 ID。客户端连接地址和节点名称只用于生成客户端导入链接，不写入 Xray 服务端配置。
-
-### 安装版本
-
-- 正式稳定版（默认、推荐）：执行官方 `install --manually-restart-later`。
-- Beta 预发布版：在上述参数后追加 `--beta`，适合测试新特性。
-
-已有服务在更新程序时暂不重启，避免官方安装阶段就因旧配置权限不兼容而退出；由本脚本完成新配置及权限检查后统一重启。全新安装时，官方脚本仍可能先启动默认空配置。
-
-安装阶段开始后若取消或出错退出，脚本会检查现有配置；检查通过则尝试完成重启，否则保留现状并提示手动修复权限、重启。未完成的交互部署仍返回非零退出码，不会报告为成功。强制结束进程（如 SIGKILL）或断电无法触发此退出处理。
-
-安装时使用官方脚本设置的服务身份（当前默认 `xray` 用户）。应用配置前读取 systemd 的实际运行用户和组：root 服务使用 `root:root 600`，非 root 服务使用 `root:<服务组> 640`；因此当前默认安装对应 `root:xray 640`。`--skip-install` 保留现有服务身份，不强行切换用户。
-
-配置先由 root 检查，再放到正式路径，以实际服务用户及组检查读取权限；检查失败不重启，恢复旧配置及原权限。启动失败也会尝试恢复旧配置并检查恢复后的服务状态。临时配置和备份仅供 root 访问。配置检查不替代客户端实际连接验证。
-
-### 直接运行
-
-首次安装：
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh)"
-```
-
-已安装 Xray，只重新生成并应用配置：
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh)" -- --skip-install
-```
-
-非 root 用户只需在命令前加 `sudo`。
-
-### 下载后运行
-
-```bash
-curl -fL https://raw.githubusercontent.com/ohbaby30/vpstools/main/xray-onekey.sh -o xray-onekey.sh
-chmod +x xray-onekey.sh
-sudo ./xray-onekey.sh
-```
-
-跳过安装，只配置现有 Xray：
-
-```bash
-sudo ./xray-onekey.sh --skip-install
-```
-
-## sing-box 一键部署
-
-sing-box 脚本与 Xray 版的交互流程相同：生成 VLESS + REALITY 配置、按网站类别选择分流、可选 `geoip:cn` 屏蔽，并输出可导入的 `vless://` 链接。
-
-当前脚本只安装 GitHub Releases 的**最新正式稳定版** sing-box，**没有 Beta/测试版选择**。脚本使用 MetaCubeX remote rule-set；首次启动会下载规则集，随后由 sing-box 缓存并更新。检测到 sing-box `1.14+` 时，脚本会自动生成 `http_clients` 与 `route.default_http_client`；使用 `--skip-install` 且本机仍是 `1.13` 时，会自动保留旧格式，避免写入 1.13 不支持的字段。
-
-客户端 ID 可自动生成 UUID，或手动填写有效 UUID。客户端连接地址和节点名称只用于生成客户端导入链接，不写入 sing-box 服务端配置。
-
-### 直接运行
-
-首次安装：
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)"
-```
-
-已安装 sing-box，只重新生成并应用配置：
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh)" -- --skip-install
-```
-
-非 root 用户只需在命令前加 `sudo`。
-
-### 下载后运行
-
-```bash
-curl -fL https://raw.githubusercontent.com/ohbaby30/vpstools/main/sing-box-onekey.sh -o sing-box-onekey.sh
-chmod +x sing-box-onekey.sh
-sudo ./sing-box-onekey.sh
-```
-
-跳过安装，只配置现有 sing-box：
-
-```bash
-sudo ./sing-box-onekey.sh --skip-install
-```
-
-## Reality 目标网站怎么填写
-
-如果同一台 VPS 已有 Caddy 或 Nginx，可以让 Reality 把认证失败的普通 TLS 流量转发给它。
-
-例如 Xray 或 sing-box 监听 `443`，本机 Caddy HTTPS 监听 `12345`：
-
-```text
-Reality 监听端口：443
-是否使用本机 Caddy/Nginx 网站作为 Reality 目标网站：是
-Reality 目标网站的地址：自动设置为 127.0.0.1
-本机 Caddy/Nginx 的 HTTPS 监听端口：12345
-本机 Caddy/Nginx 网站使用的 HTTPS 域名：与其 HTTPS 证书匹配的域名
-客户端连接地址：VPS 公网 IP 或指向该 VPS 的域名
-```
-
-Reality 监听端口不能与**同机目标网站端口**相同，否则会回连到自身。脚本会在端口相同时解析目标网站的 IPv4/IPv6 地址，并通过本机路由表拦截所有指回本机的地址。
-
-Xray 在连接地址填写域名时，会保留该域名，并询问是否增加同一 HTTPS 证书覆盖的其他域名；若填写的是 `127.0.0.1`、其他 IPv4 或 IPv6，则必须填写一个证书对应域名。sing-box 的入站 TLS 只支持一个 `server_name`，因此只使用一个目标网站证书域名，不会询问追加域名。IPv6 地址会自动写成 `[IPv6]:端口`，无需手动添加方括号。
-
-## 配置备份与回滚
-
-每次成功生成新配置前，脚本会备份旧配置，并只保留最近 3 份：
+旧配置自动备份，只留最近 3 份：
 
 - Xray：`/usr/local/etc/xray/config.json.bak.时间戳`
 - sing-box：`/usr/local/etc/sing-box/config.json.bak.时间戳`
 
-新配置会先进行语法检查；检查失败时不会修改正在使用的配置。若新配置通过检查但服务重启失败，脚本会立即恢复本次启动前的备份并尝试重新启动服务。
-
-手动回滚示例（将时间戳替换为实际文件名）：
+**手动回滚 Xray：** 替换实际备份文件名。先用 `systemctl show xray -p User -p Group` 核对；下面适用于默认的 `xray:xray` 服务。若服务仍为 root，所属组改用 root、权限改为 600，检查命令直接执行 `xray run -test -config /usr/local/etc/xray/config.json`；其他用户则对应调整组名及检查身份。备份仅 root 可读，不能只复制后直接重启。
 
 ```bash
-cp -a /usr/local/etc/xray/config.json.bak.时间戳 /usr/local/etc/xray/config.json
-systemctl restart xray
+(
+  set -e
+  cp -a /usr/local/etc/xray/config.json.bak.时间戳 /usr/local/etc/xray/config.json
+  chown root:xray /usr/local/etc/xray/config.json
+  chmod 640 /usr/local/etc/xray/config.json
+  runuser -u xray -g xray -- /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+  systemctl restart xray
+  systemctl status xray --no-pager -l
+)
 ```
+
+**手动回滚 sing-box：**
 
 ```bash
 cp -a /usr/local/etc/sing-box/config.json.bak.时间戳 /usr/local/etc/sing-box/config.json
 systemctl restart sing-box
 ```
 
-## 卸载
+自动或手动恢复后，都应确认服务状态并用客户端实际连接。配置检查不代表代理连接一定正常；配置回滚也不会回退核心程序或服务文件。
 
-卸载前如需保留配置，先自行复制配置目录到安全位置。以下命令会影响正在运行的代理服务。
-
-### Xray
-
-使用 Xray 官方安装脚本彻底卸载：
+**卸载：** 先自行备份配置。Xray 的 `--purge` 会删除程序、服务、配置和日志；下面 sing-box 命令保留配置和规则集缓存。
 
 ```bash
+# Xray：彻底卸载
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove --purge
-```
 
-`--purge` 会删除 Xray 程序、systemd 服务、配置和日志；不想丢失配置时，请先备份 `/usr/local/etc/xray/`。
-
-### sing-box
-
-仅停止并移除服务与程序，保留配置和规则集缓存：
-
-```bash
+# sing-box：停止服务，移除服务文件和程序
 systemctl disable --now sing-box
 rm -f /etc/systemd/system/sing-box.service /usr/local/bin/sing-box
 systemctl daemon-reload
 ```
 
-如确认不再需要配置和缓存，可以额外删除：
-
-```bash
-rm -rf /usr/local/etc/sing-box /var/lib/sing-box
-```
-
 ## 常见问题
 
-### Reality 目标网站可以使用 Cloudflare 吗？
+**REALITY 目标网站能用 Cloudflare 吗？** 不建议使用经 Cloudflare 橙云等共享 CDN 代理的网站：认证失败的流量会转发到目标，VPS 可能被扫描者当成转发入口。仅使用 Cloudflare DNS、灰云直连源站不属于这个场景。建议选可访问、证书域名匹配且不经共享 CDN 的 TLS 网站。
 
-不建议把解析到 Cloudflare 等共享 CDN 边缘 IP 的网站作为目标。最常见的情况是 Cloudflare 开启橙云代理：认证失败的普通流量会被 Xray/sing-box 转发至目标，扫描者可能借你的 VPS 访问该 CDN，使 VPS 成为可被滥用的转发入口。
+**为什么同机 Caddy / Nginx 不能和 REALITY 都用 443？** 同一 IP 的同一 TCP 端口不能由这两个服务同时监听。REALITY 用 443 时，Caddy / Nginx 改用其他 HTTPS 端口（如 `12345`），目标指向 `127.0.0.1:该端口`。
 
-这不等于“使用 Cloudflare DNS 就一定有问题”：仅做 DNS 解析、处于灰云直连状态且目标实际连接源站 IP，不属于上述典型 CDN 转发场景。有效的 Reality 客户端连接也不会走这条认证失败转发路径。
+**客户端连接地址和节点名称会影响服务端吗？** 不会，它们只用于生成 `vless://` 导入链接。链接包含连接凭据，请妥善保管。
 
-更适合的目标是可正常访问、证书域名与填写的目标网站域名匹配、且不经共享 CDN 的 TLS 网站。若不得不用 CDN，官方建议考虑前置 Nginx 过滤不需要的 SNI，或限制认证失败流量的速率；这些措施也有额外配置与特征风险。
+**sing-box 有 Beta 版可选吗？** 此脚本没有，只安装最新正式稳定版；Xray 脚本可以选正式版或 Beta。
 
-### 为什么同机 Caddy/Nginx 不能和 Reality 都用 443？
+**PassWall2 升级后要做什么？** 建议在 LuCI 执行一次重置：`PassWall2 → 基本设置 → 维护 → 执行重置`。**重置会清空所有设置和节点。** 请先保存完整的 `/etc/config/passwall2`，另行复制其中所有 `config nodes` 区块；重置后可尝试追加节点区块恢复，但不保证兼容新版本。
 
-同一台服务器、同一 IP、同一 TCP 端口只能由一个程序监听。Reality 监听 `443` 时，同机 Caddy/Nginx 应改用另一个 HTTPS 端口，例如 `12345`；Reality 的目标网站地址填写 `127.0.0.1`，端口填写 Caddy/Nginx 的实际 HTTPS 监听端口。
-
-### 客户端连接地址和节点名称会影响服务端吗？
-
-不会。它们只影响脚本最后生成的 `vless://` 导入链接：连接地址决定客户端连接哪台服务器，节点名称只决定客户端列表中显示的备注。
+**下载或启动失败怎么办？** 下载失败先检查 GitHub / GitHub Raw、网络、代理和 DNS；启动失败查看 `journalctl -u xray -n 40 --no-pager -l`，sing-box 则把服务名改为 `sing-box`。遇到 `permission denied` 时核对服务用户及配置权限，不要直接放宽为 `777`。
