@@ -16,6 +16,10 @@ readonly RESET='\033[0m'
 
 SKIP_INSTALL=0
 XRAY_RELEASE_CHANNEL='stable'
+XRAY_SERVICE_USER=''
+XRAY_SERVICE_GROUP=''
+XRAY_INSTALLER_FILE=''
+XRAY_RESTART_PENDING=0
 REALITY_PORT=''
 CLIENT_UUID=''
 DEST_HOST=''
@@ -290,10 +294,35 @@ select_xray_release() {
 }
 
 build_xray_install_args() {
-    XRAY_INSTALL_ARGS=(install -u root)
+    # 已有服务先继续运行，待配置及权限检查通过后由本脚本统一重启。
+    XRAY_INSTALL_ARGS=(install --manually-restart-later)
     if [[ "$XRAY_RELEASE_CHANNEL" == 'beta' ]]; then
         XRAY_INSTALL_ARGS+=(--beta)
     fi
+}
+
+finish_xray_installation() {
+    local exit_status=$? test_output
+    trap - EXIT
+    if [[ -n "$XRAY_INSTALLER_FILE" ]]; then
+        rm -f -- "$XRAY_INSTALLER_FILE" || true
+    fi
+    if ((XRAY_RESTART_PENDING)); then
+        warn "安装后的配置流程未完成，正在检查现有配置能否用于重启。"
+        if read_service_identity && test_output=$(test_service_configuration 2>&1); then
+            if systemctl restart xray && systemctl is-active --quiet xray; then
+                success "已使用现有配置完成 Xray 重启；本次交互配置未完成。"
+            else
+                warn "Xray 重启失败，请执行 journalctl -u xray -n 40 --no-pager -l 排查。"
+            fi
+        else
+            warn "现有配置或读取权限未通过检查，未主动重启。旧进程可能仍在运行，不能视为升级完成。"
+            warn "请检查 /usr/local/etc/xray/config.json 的读取权限，修复后执行 systemctl restart xray。"
+        fi
+        # 取消或失败时，即使补做重启成功，也不能把未完成的部署报告为成功。
+        ((exit_status != 0)) || exit_status=1
+    fi
+    exit "$exit_status"
 }
 
 install_xray() {
@@ -301,8 +330,7 @@ install_xray() {
     require_command curl
     build_xray_install_args
     installer=$(mktemp /tmp/xray-install.XXXXXX.sh)
-    # 无论安装成功还是因错误退出，都只清理本函数创建的临时安装脚本。
-    trap "rm -f -- '$installer'" EXIT
+    XRAY_INSTALLER_FILE=$installer
 
     info "正在下载 Xray 官方安装脚本……"
     curl -fL --retry 3 --connect-timeout 15 "$XRAY_INSTALL_URL" -o "$installer"
@@ -312,10 +340,11 @@ install_xray() {
     else
         info "将安装 Xray 正式稳定版。"
     fi
-    info "正在安装 Xray，并将 systemd 服务用户设置为 root……"
+    info "正在安装 Xray，服务运行用户由官方安装脚本设置……"
+    XRAY_RESTART_PENDING=1
     bash "$installer" "${XRAY_INSTALL_ARGS[@]}"
     rm -f "$installer"
-    trap - EXIT
+    XRAY_INSTALLER_FILE=''
 
     require_command xray
     success "Xray 安装完成：$(xray version | head -n 1)"
@@ -866,12 +895,41 @@ prune_config_backups() {
     info "仅保留最近 ${BACKUP_KEEP_COUNT} 份配置备份。"
 }
 
+read_service_identity() {
+    XRAY_SERVICE_USER=$(systemctl show xray -p User --value) || return 1
+    XRAY_SERVICE_USER=${XRAY_SERVICE_USER:-root}
+    XRAY_SERVICE_GROUP=$(systemctl show xray -p Group --value) || return 1
+    if [[ -z "$XRAY_SERVICE_GROUP" ]]; then
+        XRAY_SERVICE_GROUP=$(id -gn "$XRAY_SERVICE_USER") || return 1
+    fi
+    id "$XRAY_SERVICE_USER" >/dev/null 2>&1 || return 1
+    getent group "$XRAY_SERVICE_GROUP" >/dev/null || return 1
+    if [[ "$(id -u "$XRAY_SERVICE_USER")" != '0' ]]; then
+        require_command runuser
+    fi
+    info "现有服务运行身份：${XRAY_SERVICE_USER}:${XRAY_SERVICE_GROUP}"
+}
+
+test_service_configuration() {
+    if [[ "$(id -u "$XRAY_SERVICE_USER")" == '0' ]]; then
+        xray run -test -config "$XRAY_CONFIG_FILE"
+    else
+        runuser -u "$XRAY_SERVICE_USER" -g "$XRAY_SERVICE_GROUP" -- \
+            "$(command -v xray)" run -test -config "$XRAY_CONFIG_FILE"
+    fi
+}
+
 install_configuration() {
     local temp_dir temp_config backup_file='' timestamp test_output
-    mkdir -p "$XRAY_CONFIG_DIR"
-    temp_dir=$(mktemp -d "${XRAY_CONFIG_DIR}/.config-build.XXXXXX")
+    local old_owner='' old_group='' old_mode='' restarted=0
+    if ! read_service_identity; then
+        warn "无法确定 Xray 服务运行身份，配置未修改。"
+        return 1
+    fi
+    mkdir -p "$XRAY_CONFIG_DIR" || return 1
+    temp_dir=$(mktemp -d "${XRAY_CONFIG_DIR}/.config-build.XXXXXX") || return 1
     temp_config="${temp_dir}/config.json"
-    write_config "$temp_config"
+    write_config "$temp_config" || return 1
 
     info "正在检查 Xray 配置……"
     if ! test_output=$(xray run -test -config "$temp_config" 2>&1); then
@@ -883,30 +941,60 @@ install_configuration() {
     success "Xray 配置检查通过。"
 
     if [[ -f "$XRAY_CONFIG_FILE" ]]; then
+        old_owner=$(stat -c %u "$XRAY_CONFIG_FILE") || return 1
+        old_group=$(stat -c %g "$XRAY_CONFIG_FILE") || return 1
+        old_mode=$(stat -c %a "$XRAY_CONFIG_FILE") || return 1
         timestamp=$(date +%Y%m%d-%H%M%S)
         backup_file="${XRAY_CONFIG_FILE}.bak.${timestamp}"
-        cp -a "$XRAY_CONFIG_FILE" "$backup_file"
+        cp -a "$XRAY_CONFIG_FILE" "$backup_file" || return 1
+        # 备份含连接凭据，只供 root 恢复；原权限单独记录用于回退。
+        chown 0:0 "$backup_file" && chmod 600 "$backup_file" || return 1
         info "旧配置已备份到：$backup_file"
         prune_config_backups "$XRAY_CONFIG_FILE"
     fi
-    mv -f "$temp_config" "$XRAY_CONFIG_FILE"
+    # 先在私有临时目录设置正式权限，再替换配置，避免暴露凭据。
+    if [[ "$(id -u "$XRAY_SERVICE_USER")" == '0' ]]; then
+        chown 0:0 "$temp_config" && chmod 600 "$temp_config" || return 1
+    else
+        chown "0:$XRAY_SERVICE_GROUP" "$temp_config" && chmod 640 "$temp_config" || return 1
+    fi
+    mv -f "$temp_config" "$XRAY_CONFIG_FILE" || return 1
     rmdir "$temp_dir" 2>/dev/null || true
-    chmod 600 "$XRAY_CONFIG_FILE"
 
-    systemctl daemon-reload
-    systemctl enable xray >/dev/null
-    if systemctl restart xray && systemctl is-active --quiet xray; then
-        success "Xray 已设置为开机自启并成功启动。"
-        systemctl --no-pager --full status xray || true
-        return 0
+    info "正在以服务用户检查正式配置及文件访问权限……"
+    if test_output=$(test_service_configuration 2>&1); then
+        if systemctl daemon-reload && systemctl enable xray >/dev/null; then
+            restarted=1
+            if systemctl restart xray && systemctl is-active --quiet xray; then
+                XRAY_RESTART_PENDING=0
+                success "Xray 已设置为开机自启并成功启动。"
+                systemctl --no-pager --full status xray || true
+                return 0
+            fi
+        fi
+    else
+        printf '%s\n' "$test_output" >&2
+        warn "服务用户无法通过配置检查，未重启服务。"
     fi
 
-    warn "Xray 启动失败，最近的服务日志如下："
+    warn "Xray 配置应用失败，最近的服务日志如下："
     journalctl -u xray --no-pager -n 50 || true
     if [[ -n "$backup_file" && -f "$backup_file" ]]; then
-        warn "正在恢复启动前的配置：$backup_file"
-        cp -a "$backup_file" "$XRAY_CONFIG_FILE"
-        systemctl restart xray >/dev/null 2>&1 || true
+        warn "正在恢复原配置及原文件权限：$backup_file"
+        if ! { cp -a "$backup_file" "$XRAY_CONFIG_FILE" &&
+            chown "${old_owner}:${old_group}" "$XRAY_CONFIG_FILE" &&
+            chmod "$old_mode" "$XRAY_CONFIG_FILE"; }; then
+            warn "原配置恢复失败，请使用备份手动恢复。"
+            return 1
+        fi
+        if ((restarted)); then
+            if systemctl restart xray && systemctl is-active --quiet xray; then
+                XRAY_RESTART_PENDING=0
+                success "原配置已恢复，Xray 服务正常运行。"
+            else
+                warn "原配置已恢复，但服务仍未启动，请检查日志。"
+            fi
+        fi
     fi
     return 1
 }
@@ -943,6 +1031,9 @@ main() {
     printf '%b========== %s ==========%b\n' "$GREEN" "$SCRIPT_NAME" "$RESET"
     warn "脚本会安装 Xray、生成 Reality 配置并重启 xray 服务。"
     ask_yes_no '确认继续吗？' y || exit 0
+    trap finish_xray_installation EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     if ((SKIP_INSTALL == 0)); then
         section_header '安装 Xray'
